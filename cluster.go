@@ -10,25 +10,25 @@ import (
 
 const hashSlots = 16384
 
-// Cluster manages a redis cluster.
+// Cluster manages a redis cluster. If the CreatePool field is not nil,
+// a redis.Pool is used to get connections for each node in the cluster.
+// If it is nil, redis.Dial is called to get new connections.
 type Cluster struct {
 	// StartupNodes is the list of initial nodes that make up
 	// the cluster. The values are expected as "address:port"
 	// (e.g.: "111.222.333.444:6379").
 	StartupNodes []string
 
-	// DialOptions is the list of options to set on each new connection
-	// if no redis.Pool is used (if CreatePool is nil). If CreatePool is
-	// not nil, then this is the list of options that will be passed
-	// as the options parameter, which may or may not be used by the
-	// CreatePool function.
+	// DialOptions is the list of options to set on each new connection.
+	// It is passed to either CreatePool or redis.Dial, if CreatePool is
+	// nil.
 	DialOptions []redis.DialOption
 
 	// CreatePool is the function to call to create a redis.Pool for
 	// the specified TCP address, using the provided options
-	// as set in DialOptions. If this function is not nil, then a
+	// as set in DialOptions. If this field is not nil, then a
 	// redis.Pool will be created for each node in the cluster and the
-	// pool is used to manage the connections. If it is nil, then
+	// pool will be used to manage the connections. If it is nil, then
 	// redis.Dial is called to get new connections.
 	CreatePool func(address string, options ...redis.DialOption) (*redis.Pool, error)
 
@@ -187,15 +187,6 @@ func (c *Cluster) populateNodes() {
 // documentation for how the hash of related keys can be controlled
 // so that they live on the same node.
 func (c *Cluster) Get() redis.Conn {
-	return nil
-}
-
-// GetForKeySlot returns a redis connection for the node holding
-// the specified key's slot. This can be useful when the key(s)
-// to handle are known in advance, but keyless commands need
-// to be run first (e.g. MULTI).
-func (c *Cluster) GetForKeySlot(key string) redis.Conn {
-	// TODO : something like that... return c.getConnForAddr(c.mapping[slot])
 	return nil
 }
 
