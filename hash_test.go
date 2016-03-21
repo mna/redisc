@@ -28,7 +28,12 @@ func TestHashSlotForKey(t *testing.T) {
 		{"a{bcd}", 1872},
 		{"{abcd}", 10294},
 		{"abcd", 10294},
+		{"{a", 10276},
+		{"a}", 5921},
 		{"123456789", 12739},
+		{"a≠b", 11870},
+		{"•", 97},
+		{"a{}{b}c", 14872},
 	}
 
 	for _, c := range cases {
