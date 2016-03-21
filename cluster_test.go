@@ -1,7 +1,6 @@
 package redisc
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/PuerkitoBio/juggler/internal/redistest"
@@ -35,10 +34,15 @@ func TestRefreshMappingCluster(t *testing.T) {
 	err := c.RefreshMapping()
 	if assert.NoError(t, err, "RefreshMapping") {
 		var prev string
+		pix := -1
 		for ix, master := range c.mapping {
 			if master != prev {
 				prev = master
-				fmt.Printf("%5d: %s\n", ix, master)
+				t.Logf("%5d: %s\n", ix, master)
+				pix++
+			}
+			if assert.NotEmpty(t, master) {
+				assert.Contains(t, master, ports[pix], "expected master")
 			}
 		}
 	}
