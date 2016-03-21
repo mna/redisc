@@ -19,3 +19,18 @@ func TestRefreshMappingNonCluster(t *testing.T) {
 		assert.Contains(t, err.Error(), "redisc: all nodes failed", "expected error message")
 	}
 }
+
+func TestRefreshMappingCluster(t *testing.T) {
+	fn, ports := redistest.StartCluster(t, nil)
+	defer fn()
+
+	for i, p := range ports {
+		ports[i] = ":" + p
+	}
+	c := &Cluster{
+		StartupNodes: ports,
+	}
+
+	err := c.RefreshMapping()
+	assert.NoError(t, err, "RefreshMapping")
+}
