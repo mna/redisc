@@ -74,9 +74,20 @@ func (c *Cluster) refreshMapping(addrs []string) error {
 		if err == nil {
 			// succeeded, save as mapping
 			c.mu.Lock()
+			// mark all current nodes as false
+			for k := range c.nodes {
+				c.nodes[k] = false
+			}
 			for _, sm := range m {
 				for ix := sm.start; ix <= sm.end; ix++ {
 					c.mapping[ix] = sm.master
+					c.nodes[sm.master] = true
+				}
+			}
+			// remove all nodes that are gone from the cluster
+			for k, ok := range c.nodes {
+				if !ok {
+					delete(c.nodes, k)
 				}
 			}
 			c.mu.Unlock()
