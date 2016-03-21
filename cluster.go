@@ -125,7 +125,7 @@ func (c *Cluster) getClusterSlots(addr string) ([]slotMapping, error) {
 		return nil, err
 	}
 	defer conn.Close()
-	vals, err := redis.Values(conn.Do("CLUSTER SLOTS"))
+	vals, err := redis.Values(conn.Do("CLUSTER", "SLOTS"))
 	if err != nil {
 		return nil, err
 	}
