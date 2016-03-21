@@ -6,7 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestHashSlotForKey(t *testing.T) {
+func TestSlot(t *testing.T) {
 	cases := []struct {
 		in  string
 		out int
@@ -37,7 +37,7 @@ func TestHashSlotForKey(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		got := HashSlotForKey(c.in)
+		got := Slot(c.in)
 		assert.Equal(t, c.out, got, c.in)
 	}
 }

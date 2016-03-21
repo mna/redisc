@@ -190,6 +190,15 @@ func (c *Cluster) Get() redis.Conn {
 	return nil
 }
 
+// GetForKeySlot returns a redis connection for the node holding
+// the specified key's slot. This can be useful when the key(s)
+// to handle are known in advance, but keyless commands need
+// to be run first (e.g. MULTI).
+func (c *Cluster) GetForKeySlot(key string) redis.Conn {
+	// TODO : something like that... return c.getConnForAddr(c.mapping[slot])
+	return nil
+}
+
 // Close releases the resources used by the cluster. It closes all the
 // pools that were created, if any.
 func (c *Cluster) Close() error {
