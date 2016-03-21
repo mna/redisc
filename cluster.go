@@ -57,20 +57,20 @@ func (c *Cluster) RefreshMapping() error {
 		c.populateNodes()
 	}
 
-	// grab a slice of nodes so we don't hold on to the lock during
+	// grab a slice of addresses so we don't hold on to the lock during
 	// the CLUSTER SLOTS calls.
-	nodes := make([]string, 0, len(c.nodes))
-	for node := range c.nodes {
-		nodes = append(nodes, node)
+	addrs := make([]string, 0, len(c.nodes))
+	for addr := range c.nodes {
+		addrs = append(addrs, addr)
 	}
 	c.mu.Unlock()
 
-	return c.refreshMapping(nodes)
+	return c.refreshMapping(addrs)
 }
 
-func (c *Cluster) refreshMapping(nodes []string) error {
-	for _, node := range nodes {
-		m, err := c.getClusterSlots(node)
+func (c *Cluster) refreshMapping(addrs []string) error {
+	for _, addr := range addrs {
+		m, err := c.getClusterSlots(addr)
 		if err == nil {
 			// succeeded, save as mapping
 			c.mu.Lock()
