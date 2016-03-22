@@ -8,20 +8,20 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestRefreshMappingNonCluster(t *testing.T) {
+func TestRefreshNonCluster(t *testing.T) {
 	cmd, port := redistest.StartServer(t, nil, "")
 	defer cmd.Process.Kill()
 
 	c := &Cluster{
 		StartupNodes: []string{":" + port},
 	}
-	err := c.RefreshMapping()
-	if assert.Error(t, err, "RefreshMapping") {
+	err := c.Refresh()
+	if assert.Error(t, err, "Refresh") {
 		assert.Contains(t, err.Error(), "redisc: all nodes failed", "expected error message")
 	}
 }
 
-func TestRefreshMappingCluster(t *testing.T) {
+func TestRefreshCluster(t *testing.T) {
 	fn, ports := redistest.StartCluster(t, nil)
 	defer fn()
 
@@ -32,8 +32,8 @@ func TestRefreshMappingCluster(t *testing.T) {
 		StartupNodes: ports,
 	}
 
-	err := c.RefreshMapping()
-	if assert.NoError(t, err, "RefreshMapping") {
+	err := c.Refresh()
+	if assert.NoError(t, err, "Refresh") {
 		var prev string
 		pix := -1
 		for ix, master := range c.mapping {

@@ -19,8 +19,8 @@ func Example() {
 	defer cluster.Close()
 
 	// initialize its mapping
-	if err := cluster.RefreshMapping(); err != nil {
-		log.Fatalf("RefreshMapping failed: %v", err)
+	if err := cluster.Refresh(); err != nil {
+		log.Fatalf("Refreshfailed: %v", err)
 	}
 
 	// grab a connection from the pool

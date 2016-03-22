@@ -38,14 +38,14 @@ type Cluster struct {
 	mapping [hashSlots]string // hash slot number to master server address
 }
 
-// RefreshMapping updates the cluster's internal mapping of hash slots
+// Refresh updates the cluster's internal mapping of hash slots
 // to redis node. It calls CLUSTER SLOTS on each known node until one
 // of them succeeds.
 //
 // It should typically be called after creating the Cluster and before
 // using it. The cluster automatically keeps its mapping up-to-date
 // afterwards, based on the redis commands' MOVED responses.
-func (c *Cluster) RefreshMapping() error {
+func (c *Cluster) Refresh() error {
 	c.mu.Lock()
 	if err := c.err; err != nil {
 		c.mu.Unlock()
@@ -65,10 +65,10 @@ func (c *Cluster) RefreshMapping() error {
 	}
 	c.mu.Unlock()
 
-	return c.refreshMapping(addrs)
+	return c.refresh(addrs)
 }
 
-func (c *Cluster) refreshMapping(addrs []string) error {
+func (c *Cluster) refresh(addrs []string) error {
 	for _, addr := range addrs {
 		m, err := c.getClusterSlots(addr)
 		if err == nil {
