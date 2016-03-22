@@ -35,12 +35,6 @@ type Cluster struct {
 	// is called.
 	CreatePool func(address string, options ...redis.DialOption) (*redis.Pool, error)
 
-	// MaxAttempts is the maximum number of attempts allowed when
-	// running a command on a connection returned by RetryConn, in
-	// order to automatically follow MOVED or ASK redirections. The
-	// default value of 0 means no limit.
-	MaxAttempts int
-
 	mu            sync.Mutex             // protects following fields
 	err           error                  // broken connection error
 	pools         map[string]*redis.Pool // created pools per node

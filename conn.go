@@ -67,6 +67,17 @@ func (e *RedirError) Error() string {
 	return e.raw
 }
 
+// IsTryAgain returns true if the error is a redis cluster
+// error of type TRYAGAIN.
+func IsTryAgain(err error) bool {
+	re, ok := err.(redis.Error)
+	if !ok {
+		return false
+	}
+	parts := strings.Fields(re.Error())
+	return len(parts) > 0 && parts[0] == "TRYAGAIN"
+}
+
 // ParseRedir parses err into a RedirError. If err is
 // not a MOVED or ASK error or if it is nil, it returns nil.
 func ParseRedir(err error) *RedirError {
