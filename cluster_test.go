@@ -131,6 +131,35 @@ func TestCommands(t *testing.T) {
 			{"HMSET", redis.Args{"hc", "f1", "a", "f2", "b"}, "OK", ""},
 			{"HSET", redis.Args{"ha", "f1", "2"}, int64(1), ""},
 			{"HGET", redis.Args{"ha", "f1"}, []byte("2"), ""},
+			{"HGETALL", redis.Args{"ha"}, []interface{}{[]byte("f1"), []byte("2")}, ""},
+			{"HSETNX", redis.Args{"ha", "f2", "3"}, int64(1), ""},
+			//{"HSTRLEN", redis.Args{"hb", "f2"}, int64(3), ""}, // redis 3.2 only
+			{"HVALS", redis.Args{"hb"}, []interface{}{[]byte("1"), []byte("0.5")}, ""},
+			{"HSCAN", redis.Args{"hb", 0}, lenResult(2), ""},
+		},
+		"hyperloglog": {
+			{"PFADD", redis.Args{"hll", "a", "b", "c"}, int64(1), ""},
+			{"PFCOUNT", redis.Args{"hll"}, int64(3), ""},
+			{"PFADD", redis.Args{"hll2", "d"}, int64(1), ""},
+			{"PFMERGE", redis.Args{"hll", "hll2"}, nil, "CROSSSLOT Keys in request don't hash to the same slot"},
+		},
+		"keys": {
+			{"SET", redis.Args{"k1", "z"}, "OK", ""},
+			{"EXISTS", redis.Args{"k1"}, int64(1), ""},
+			{"DUMP", redis.Args{"k1"}, lenResult(10), ""},
+			{"EXPIRE", redis.Args{"k1", 10}, int64(1), ""},
+			{"EXPIREAT", redis.Args{"k1", time.Now().Add(time.Hour).Unix()}, int64(1), ""},
+			{"KEYS", redis.Args{"z*"}, []interface{}{}, ""}, // KEYS is supported, but uses a random node and returns keys from that node (undeterministic)
+			{"MOVE", redis.Args{"k1", 2}, nil, "ERR MOVE is not allowed in cluster mode"},
+			{"PERSIST", redis.Args{"k1"}, int64(1), ""},
+			{"PEXPIRE", redis.Args{"k1", 10000}, int64(1), ""},
+			{"PEXPIREAT", redis.Args{"k1", time.Now().Add(time.Hour).UnixNano() / int64(time.Millisecond)}, int64(1), ""},
+			{"PTTL", redis.Args{"k1"}, lenResult(3500000), ""},
+			// RANDOMKEY is not deterministic
+			{"RENAME", redis.Args{"k1", "k2"}, nil, "CROSSSLOT Keys in request don't hash to the same slot"},
+			{"RENAMENX", redis.Args{"k1", "k2"}, nil, "CROSSSLOT Keys in request don't hash to the same slot"},
+			{"SCAN", redis.Args{0}, lenResult(2), ""}, // works, but only for the keys on that random node
+			{"TTL", redis.Args{"k1"}, lenResult(3000), ""},
 		},
 	}
 
@@ -166,8 +195,15 @@ func runCommands(t *testing.T, c *Cluster, cmds []redisCmd) {
 		} else {
 			assert.NoError(t, err, cmd.name)
 			if lr, ok := cmd.resp.(lenResult); ok {
-				if assert.IsType(t, []byte(nil), res, "bytes result") {
-					assert.True(t, len(res.([]byte)) >= int(lr), "result has at least %d bytes", lr)
+				switch res := res.(type) {
+				case []byte:
+					assert.True(t, len(res) >= int(lr), "result has at least %d bytes, has %d", lr, len(res))
+				case []interface{}:
+					assert.Equal(t, int(lr), len(res), "result array has %d items, has %d", lr, len(res))
+				case int64:
+					assert.True(t, res >= int64(lr), "result is at least %d, is %d", lr, res)
+				default:
+					t.Errorf("unexpected result type %T", res)
 				}
 			} else {
 				if !assert.Equal(t, cmd.resp, res, cmd.name) {

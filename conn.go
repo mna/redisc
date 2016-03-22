@@ -67,15 +67,28 @@ func (e *RedirError) Error() string {
 	return e.raw
 }
 
-// IsTryAgain returns true if the error is a redis cluster
-// error of type TRYAGAIN.
-func IsTryAgain(err error) bool {
+func isRedisErr(err error, typ string) bool {
 	re, ok := err.(redis.Error)
 	if !ok {
 		return false
 	}
 	parts := strings.Fields(re.Error())
-	return len(parts) > 0 && parts[0] == "TRYAGAIN"
+	return len(parts) > 0 && parts[0] == typ
+}
+
+// IsTryAgain returns true if the error is a redis cluster
+// error of type TRYAGAIN, meaning that the command is valid,
+// but the cluster is in an unstable state and it can't complete
+// the request at the moment.
+func IsTryAgain(err error) bool {
+	return isRedisErr(err, "TRYAGAIN")
+}
+
+// IsCrossSlot returns true if the error is a redis cluster
+// error of type CROSSSLOT, meaning that a command was sent
+// with keys from different slots.
+func IsCrossSlot(err error) bool {
+	return isRedisErr(err, "CROSSSLOT")
 }
 
 // ParseRedir parses err into a RedirError. If err is
