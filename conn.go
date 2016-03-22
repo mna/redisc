@@ -67,6 +67,29 @@ func (e *RedirError) Error() string {
 	return e.raw
 }
 
+// ParseRedir parses err into a RedirError. If err is
+// not a MOVED or ASK error or if it is nil, it returns nil.
+func ParseRedir(err error) *RedirError {
+	re, ok := err.(redis.Error)
+	if !ok {
+		return nil
+	}
+	parts := strings.Fields(re.Error())
+	if len(parts) != 3 || (parts[0] != "MOVED" && parts[0] != "ASK") {
+		return nil
+	}
+	slot, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return nil
+	}
+	return &RedirError{
+		Type:    parts[0],
+		NewSlot: slot,
+		Addr:    parts[2],
+		raw:     re.Error(),
+	}
+}
+
 // binds the connection to a specific node, the one holding the slot
 // or a random node if slot is -1, iff the connection is not broken
 // and is not already bound. It returns the redis conn, true if it
@@ -123,26 +146,6 @@ func (c *Conn) Bind(keys ...string) error {
 	return nil
 }
 
-func toRedir(err error) *RedirError {
-	re, ok := err.(redis.Error)
-	if !ok {
-		return nil
-	}
-	parts := strings.Fields(re.Error())
-	if len(parts) != 3 || (parts[0] != "MOVED" && parts[0] != "ASK") {
-		return nil
-	}
-	slot, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return nil
-	}
-	return &RedirError{
-		Type:    parts[0],
-		NewSlot: slot,
-		Addr:    parts[2],
-	}
-}
-
 // Do sends a command to the server and returns the received reply.
 // If the connection is not yet bound to a cluster node, it will be
 // after this call, based on the rules documented in the Conn type.
@@ -154,7 +157,7 @@ func (c *Conn) Do(cmd string, args ...interface{}) (interface{}, error) {
 	v, err := rc.Do(cmd, args...)
 
 	// handle redirections, if any
-	if re := toRedir(err); re != nil {
+	if re := ParseRedir(err); re != nil {
 		if re.Type == "MOVED" {
 			c.cluster.needsRefresh(re)
 		}
@@ -186,7 +189,7 @@ func (c *Conn) Receive() (interface{}, error) {
 	v, err := rc.Receive()
 
 	// handle redirections, if any
-	if re := toRedir(err); re != nil {
+	if re := ParseRedir(err); re != nil {
 		if re.Type == "MOVED" {
 			c.cluster.needsRefresh(re)
 		}

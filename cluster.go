@@ -37,9 +37,8 @@ type Cluster struct {
 
 	// MaxAttempts is the maximum number of attempts allowed when
 	// running a command on a connection returned by RetryConn, in
-	// order to automatically follow MOVED or ASK redirections. This
-	// field controls how many of those attempts are executed before
-	// returning an error.
+	// order to automatically follow MOVED or ASK redirections. The
+	// default value of 0 means no limit.
 	MaxAttempts int
 
 	mu            sync.Mutex             // protects following fields

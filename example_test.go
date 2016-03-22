@@ -20,7 +20,7 @@ func Example() {
 
 	// initialize its mapping
 	if err := cluster.Refresh(); err != nil {
-		log.Fatalf("Refreshfailed: %v", err)
+		log.Fatalf("Refresh failed: %v", err)
 	}
 
 	// grab a connection from the pool
@@ -33,6 +33,24 @@ func Example() {
 		log.Fatalf("GET failed: %v", err)
 	}
 	log.Println(s)
+
+	// grab a non-pooled connection
+	conn2, err := cluster.Dial()
+	if err != nil {
+		log.Fatalf("Dial failed: %v", err)
+	}
+	defer conn2.Close()
+
+	// make it handle redirections automatically
+	rc, err := redisc.RetryConn(conn2)
+	if err != nil {
+		log.Fatalf("RetryConn failed: %v", err)
+	}
+
+	_, err = rc.Do("SET", "some-key", 2)
+	if err != nil {
+		log.Fatalf("SET failed: %v", err)
+	}
 }
 
 func createPool(addr string, opts ...redis.DialOption) (*redis.Pool, error) {
