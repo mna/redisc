@@ -114,7 +114,7 @@ func (c *Conn) bind(slot int) (rc redis.Conn, ok bool, err error) {
 			if err2 != nil {
 				err = err2
 			} else {
-				c.rc = conn
+				c.rc, rc = conn, conn
 				ok = true
 			}
 		}

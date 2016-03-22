@@ -42,7 +42,7 @@ func Example() {
 	defer conn2.Close()
 
 	// make it handle redirections automatically
-	rc, err := redisc.RetryConn(conn2)
+	rc, err := redisc.RetryConn(conn2, 3, 100*time.Millisecond)
 	if err != nil {
 		log.Fatalf("RetryConn failed: %v", err)
 	}

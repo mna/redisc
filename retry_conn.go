@@ -12,6 +12,10 @@ import (
 // (MOVED and ASK replies) and retries for TRYAGAIN errors.
 // Only Do, Close and Err can be called on that connection,
 // all other methods return an error.
+//
+// The maxAtt parameter indicates the maximum number of attempts
+// to successfully execute the command. The tryAgainDelay is the
+// duration to wait before retrying a TRYAGAIN error.
 func RetryConn(c redis.Conn, maxAtt int, tryAgainDelay time.Duration) (redis.Conn, error) {
 	cc, ok := c.(*Conn)
 	if !ok {
@@ -59,8 +63,8 @@ func (rc *retryConn) do(cmd string, args ...interface{}) (interface{}, error) {
 		// handle redirection
 		conn, err := cluster.getConnForSlot(re.NewSlot, rc.c.forceDial)
 		if err != nil {
-			// could not get connection to that node, return the Do result
-			return v, err
+			// could not get connection to that node, return that error
+			return nil, err
 		}
 		rc.c.mu.Lock()
 		rc.c.rc = conn
@@ -69,7 +73,7 @@ func (rc *retryConn) do(cmd string, args ...interface{}) (interface{}, error) {
 
 		att++
 	}
-	return nil, errors.New("redisc: too many redirections")
+	return nil, errors.New("redisc: too many attempts")
 }
 
 func (rc *retryConn) Err() error {

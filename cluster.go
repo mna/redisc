@@ -10,8 +10,6 @@ import (
 	"github.com/garyburd/redigo/redis"
 )
 
-var rnd = rand.New(rand.NewSource(time.Now().UnixNano()))
-
 const hashSlots = 16384
 
 // Cluster manages a redis cluster. If the CreatePool field is not nil,
@@ -35,12 +33,12 @@ type Cluster struct {
 	// is called.
 	CreatePool func(address string, options ...redis.DialOption) (*redis.Pool, error)
 
-	mu            sync.Mutex             // protects following fields
-	err           error                  // broken connection error
-	pools         map[string]*redis.Pool // created pools per node
-	nodes         map[string]bool        // set of known active nodes, kept up-to-date
-	mapping       [hashSlots]string      // hash slot number to master server address
-	refreshNeeded bool                   // refresh mapping on next command
+	mu              sync.Mutex             // protects following fields
+	err             error                  // broken connection error
+	pools           map[string]*redis.Pool // created pools per node
+	nodes           map[string]bool        // set of known active nodes, kept up-to-date
+	mapping         [hashSlots]string      // hash slot number to master server address
+	noRefreshNeeded bool                   // do not refresh mapping on next command (so refresh IS needed initially)
 }
 
 // Refresh updates the cluster's internal mapping of hash slots
@@ -54,7 +52,7 @@ func (c *Cluster) Refresh() error {
 	c.mu.Lock()
 	err := c.err
 	if err == nil {
-		c.refreshNeeded = true // avoid creating concurrent refresh goroutines
+		c.noRefreshNeeded = false // avoid creating concurrent refresh goroutines
 	}
 	c.mu.Unlock()
 	if err != nil {
@@ -88,7 +86,7 @@ func (c *Cluster) refresh() error {
 				}
 			}
 			// mark that no refresh is needed until another MOVED
-			c.refreshNeeded = false
+			c.noRefreshNeeded = true
 			c.mu.Unlock()
 
 			return nil
@@ -100,12 +98,14 @@ func (c *Cluster) refresh() error {
 // needsRefresh handles automatic update of the mapping.
 func (c *Cluster) needsRefresh(re *RedirError) {
 	c.mu.Lock()
-	c.mapping[re.NewSlot] = re.Addr
-	if !c.refreshNeeded {
-		// refreshNeeded is reset to false only once the goroutine has
+	if re != nil {
+		c.mapping[re.NewSlot] = re.Addr
+	}
+	if c.noRefreshNeeded {
+		// noRefreshNeeded is reset to true only once the goroutine has
 		// finished updating the mapping, so a new refresh goroutine
 		// will only be started if none is running.
-		c.refreshNeeded = true
+		c.noRefreshNeeded = false
 		go c.refresh()
 	}
 	c.mu.Unlock()
@@ -169,6 +169,9 @@ func (c *Cluster) getConnForAddr(addr string, forceDial bool) (redis.Conn, error
 		}
 
 		c.mu.Lock()
+		if c.pools == nil {
+			c.pools = make(map[string]*redis.Pool, len(c.StartupNodes))
+		}
 		c.pools[addr] = pool
 		p = pool
 	}
@@ -179,15 +182,19 @@ func (c *Cluster) getConnForAddr(addr string, forceDial bool) (redis.Conn, error
 	return conn, conn.Err()
 }
 
+var errNoNodeForSlot = errors.New("redisc: no node for slot")
+
 func (c *Cluster) getConnForSlot(slot int, forceDial bool) (redis.Conn, error) {
 	c.mu.Lock()
 	addr := c.mapping[slot]
 	c.mu.Unlock()
 	if addr == "" {
-		return nil, errors.New("redisc: no node for slot " + strconv.Itoa(slot))
+		return nil, errNoNodeForSlot
 	}
 	return c.getConnForAddr(addr, forceDial)
 }
+
+var rnd = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 func (c *Cluster) getRandomConn(forceDial bool) (redis.Conn, error) {
 	addrs := c.getNodeAddrs()
@@ -205,6 +212,9 @@ func (c *Cluster) getRandomConn(forceDial bool) (redis.Conn, error) {
 func (c *Cluster) getConn(preferredSlot int, forceDial bool) (conn redis.Conn, err error) {
 	if preferredSlot >= 0 {
 		conn, err = c.getConnForSlot(preferredSlot, forceDial)
+		if err == errNoNodeForSlot {
+			c.needsRefresh(nil)
+		}
 	}
 	if preferredSlot < 0 || err != nil {
 		conn, err = c.getRandomConn(forceDial)
