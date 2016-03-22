@@ -160,6 +160,8 @@ func TestCommands(t *testing.T) {
 			{"RENAMENX", redis.Args{"k1", "k2"}, nil, "CROSSSLOT Keys in request don't hash to the same slot"},
 			{"SCAN", redis.Args{0}, lenResult(2), ""}, // works, but only for the keys on that random node
 			{"TTL", redis.Args{"k1"}, lenResult(3000), ""},
+			{"TYPE", redis.Args{"k1"}, "string", ""},
+			{"DEL", redis.Args{"k1"}, int64(1), ""},
 		},
 	}
 
