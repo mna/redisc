@@ -3,6 +3,8 @@ package redisc
 import (
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"sync"
 
 	"github.com/garyburd/redigo/redis"
@@ -43,6 +45,26 @@ type Conn struct {
 	mu  sync.Mutex
 	err error
 	rc  redis.Conn
+}
+
+// RedirError is a cluster redirection error. It indicates that
+// the redis node returned either a MOVED or an ASK error, as
+// specified by the Type field.
+type RedirError struct {
+	// Type indicates if the redirection is a MOVED or an ASK.
+	Type string
+	// NewSlot is the slot number of the redirection.
+	NewSlot int
+	// Addr is the node address to redirect to.
+	Addr string
+
+	raw string
+}
+
+// Error returns the error message of a RedirError. This is the
+// message as received from redis.
+func (e *RedirError) Error() string {
+	return e.raw
 }
 
 // binds the connection to a specific node, the one holding the slot
@@ -96,9 +118,29 @@ func (c *Conn) Bind(keys ...string) error {
 	}
 	if !ok {
 		// was already bound
-		return errors.New("redisc: connection already bound to a slot")
+		return errors.New("redisc: connection already bound to a node")
 	}
 	return nil
+}
+
+func toRedir(err error) *RedirError {
+	re, ok := err.(redis.Error)
+	if !ok {
+		return nil
+	}
+	parts := strings.Fields(re.Error())
+	if len(parts) != 3 || (parts[0] != "MOVED" && parts[0] != "ASK") {
+		return nil
+	}
+	slot, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return nil
+	}
+	return &RedirError{
+		Type:    parts[0],
+		NewSlot: slot,
+		Addr:    parts[2],
+	}
 }
 
 // Do sends a command to the server and returns the received reply.
@@ -109,7 +151,17 @@ func (c *Conn) Do(cmd string, args ...interface{}) (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	return rc.Do(cmd, args...)
+	v, err := rc.Do(cmd, args...)
+
+	// handle redirections, if any
+	if re := toRedir(err); re != nil {
+		if re.Type == "MOVED" {
+			c.cluster.needsRefresh(re)
+		}
+		err = re
+	}
+
+	return v, err
 }
 
 // Send writes the command to the client's output buffer. If the
@@ -131,7 +183,17 @@ func (c *Conn) Receive() (interface{}, error) {
 	if err != nil {
 		return nil, err
 	}
-	return rc.Receive()
+	v, err := rc.Receive()
+
+	// handle redirections, if any
+	if re := toRedir(err); re != nil {
+		if re.Type == "MOVED" {
+			c.cluster.needsRefresh(re)
+		}
+		err = re
+	}
+
+	return v, err
 }
 
 // Flush flushes the output buffer to the server.

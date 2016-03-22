@@ -60,6 +60,9 @@ type Cluster struct {
 func (c *Cluster) Refresh() error {
 	c.mu.Lock()
 	err := c.err
+	if err == nil {
+		c.refreshNeeded = true // avoid creating concurrent refresh goroutines
+	}
 	c.mu.Unlock()
 	if err != nil {
 		return err
@@ -99,6 +102,20 @@ func (c *Cluster) refresh() error {
 		}
 	}
 	return errors.New("redisc: all nodes failed")
+}
+
+// needsRefresh handles automatic update of the mapping.
+func (c *Cluster) needsRefresh(re *RedirError) {
+	c.mu.Lock()
+	c.mapping[re.NewSlot] = re.Addr
+	if !c.refreshNeeded {
+		// refreshNeeded is reset to false only once the goroutine has
+		// finished updating the mapping, so a new refresh goroutine
+		// will only be started if none is running.
+		c.refreshNeeded = true
+		go c.refresh()
+	}
+	c.mu.Unlock()
 }
 
 type slotMapping struct {
