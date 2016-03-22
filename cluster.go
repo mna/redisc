@@ -11,8 +11,10 @@ import (
 const hashSlots = 16384
 
 // Cluster manages a redis cluster. If the CreatePool field is not nil,
-// a redis.Pool is used to get connections for each node in the cluster.
-// If it is nil, redis.Dial is called to get new connections.
+// a redis.Pool is used to get new connections for each node in the cluster,
+// unless Cluster.Dial was called to get the connection. If it is nil
+// or if Cluster.Dial was called, then redis.Dial is called to create
+// the actual connection.
 type Cluster struct {
 	// StartupNodes is the list of initial nodes that make up
 	// the cluster. The values are expected as "address:port"
@@ -20,16 +22,14 @@ type Cluster struct {
 	StartupNodes []string
 
 	// DialOptions is the list of options to set on each new connection.
-	// It is passed to either CreatePool or redis.Dial, if CreatePool is
-	// nil.
 	DialOptions []redis.DialOption
 
 	// CreatePool is the function to call to create a redis.Pool for
 	// the specified TCP address, using the provided options
-	// as set in DialOptions. If this field is not nil, then a
-	// redis.Pool will be created for each node in the cluster and the
-	// pool will be used to manage the connections. If it is nil, then
-	// redis.Dial is called to get new connections.
+	// as set in DialOptions. If this field is not nil, a
+	// redis.Pool is created for each node in the cluster and the
+	// pool is used to manage the connections unless Cluster.Dial
+	// is called.
 	CreatePool func(address string, options ...redis.DialOption) (*redis.Pool, error)
 
 	mu      sync.Mutex // protects following fields
@@ -39,13 +39,13 @@ type Cluster struct {
 	mapping [hashSlots]string // hash slot number to master server address
 }
 
-// RefreshMapping calls the CLUSTER SLOTS redis command and updates
-// the cluster's internal mapping of hash slots to redis node. It calls
-// the command on each startup nodes, in order, until one of them succeeds.
+// RefreshMapping updates the cluster's internal mapping of hash slots
+// to redis node. It calls CLUSTER SLOTS on each startup nodes, in order,
+// until one of them succeeds.
 //
 // It should typically be called after creating the Cluster and before
 // using it. The cluster automatically keeps its mapping up-to-date
-// when in use, based on the redis commands MOVED responses.
+// afterwards, based on the redis commands' MOVED responses.
 func (c *Cluster) RefreshMapping() error {
 	c.mu.Lock()
 	if err := c.err; err != nil {
@@ -173,19 +173,18 @@ func (c *Cluster) populateNodes() {
 	}
 }
 
+// Dial returns a connection the same way as Cluster.Get, but
+// it guarantees that the connection will not be managed by the
+// pool, even if Cluster.CreatePool is set. The actual returned
+// type is *redisc.Conn, see its documentation for details.
+func (c *Cluster) Dial() (redis.Conn, error) {
+	return nil, nil
+}
+
 // Get returns a redis.Conn interface that can be used to call
 // redis commands on the cluster. The application must close the
-// returned connection. The actual network connection is only
-// attempted on the first call to Do or Send, using the command's
-// key to determine the hash slot and the node to use to execute
-// that command. If Receive is called before any Do or Send, then
-// a random node is selected in the cluster, assuming the Receive
-// call is for pub-sub listening (in which case any node is ok).
-//
-// All commands sent using the same connection must live in the same
-// hash slot, otherwise the request will fail. See the redis cluster
-// documentation for how the hash of related keys can be controlled
-// so that they live on the same node.
+// returned connection. The actual returned type is *redisc.Conn,
+// see its documentation for details.
 func (c *Cluster) Get() redis.Conn {
 	return nil
 }
