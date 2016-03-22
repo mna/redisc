@@ -11,10 +11,9 @@ import (
 const hashSlots = 16384
 
 // Cluster manages a redis cluster. If the CreatePool field is not nil,
-// a redis.Pool is used to get new connections for each node in the cluster,
-// unless Cluster.Dial was called to get the connection. If it is nil
-// or if Cluster.Dial was called, then redis.Dial is called to create
-// the actual connection.
+// a redis.Pool is used for each node in the cluster to get connections
+// via Cluster.Get. If it is nil or if Cluster.Dial is called, redis.Dial
+// is used to get the connection.
 type Cluster struct {
 	// StartupNodes is the list of initial nodes that make up
 	// the cluster. The values are expected as "address:port"
@@ -40,8 +39,8 @@ type Cluster struct {
 }
 
 // RefreshMapping updates the cluster's internal mapping of hash slots
-// to redis node. It calls CLUSTER SLOTS on each startup nodes, in order,
-// until one of them succeeds.
+// to redis node. It calls CLUSTER SLOTS on each known node until one
+// of them succeeds.
 //
 // It should typically be called after creating the Cluster and before
 // using it. The cluster automatically keeps its mapping up-to-date
@@ -53,7 +52,8 @@ func (c *Cluster) RefreshMapping() error {
 		return err
 	}
 
-	if len(c.nodes) == 0 {
+	// populate nodes lazily, only once
+	if c.nodes == nil {
 		c.populateNodes()
 	}
 

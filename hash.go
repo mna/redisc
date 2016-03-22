@@ -17,7 +17,7 @@ func Slot(key string) int {
 }
 
 // SplitBySlot takes a list of keys and returns a list of list of keys,
-// separated by cluster slot. For example:
+// grouped by identical cluster slot. For example:
 //
 //     bySlot := SplitBySlot("k1", "k2", "k3")
 //     for _, keys := range bySlot {
