@@ -122,6 +122,15 @@ func TestCommands(t *testing.T) {
 		"hashes": {
 			{"HSET", redis.Args{"ha", "f1", "1"}, int64(1), ""},
 			{"HLEN", redis.Args{"ha"}, int64(1), ""},
+			{"HEXISTS", redis.Args{"ha", "f1"}, int64(1), ""},
+			{"HDEL", redis.Args{"ha", "f1", "f2"}, int64(1), ""},
+			{"HINCRBY", redis.Args{"hb", "f1", "1"}, int64(1), ""},
+			{"HINCRBYFLOAT", redis.Args{"hb", "f2", "0.5"}, []byte("0.5"), ""},
+			{"HKEYS", redis.Args{"hb"}, []interface{}{[]byte("f1"), []byte("f2")}, ""},
+			{"HMGET", redis.Args{"hb", "f1", "f2"}, []interface{}{[]byte("1"), []byte("0.5")}, ""},
+			{"HMSET", redis.Args{"hc", "f1", "a", "f2", "b"}, "OK", ""},
+			{"HSET", redis.Args{"ha", "f1", "2"}, int64(1), ""},
+			{"HGET", redis.Args{"ha", "f1"}, []byte("2"), ""},
 		},
 	}
 
@@ -166,5 +175,6 @@ func runCommands(t *testing.T, c *Cluster, cmds []redisCmd) {
 				}
 			}
 		}
+		require.NoError(t, conn.Close(), "Close")
 	}
 }
