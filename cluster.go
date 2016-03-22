@@ -2,11 +2,15 @@ package redisc
 
 import (
 	"errors"
+	"math/rand"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/garyburd/redigo/redis"
 )
+
+var rnd = rand.New(rand.NewSource(time.Now().UnixNano()))
 
 const hashSlots = 16384
 
@@ -32,11 +36,10 @@ type Cluster struct {
 	CreatePool func(address string, options ...redis.DialOption) (*redis.Pool, error)
 
 	// MaxAttempts is the maximum number of attempts allowed when
-	// running a command. If the cluster is moving slots around in
-	// its nodes, it may reply to a command with a MOVED or ASK error,
-	// in which case the package retries with the redis-specified
-	// node. This field controls how many of those attempts are executed
-	// before returning an error.
+	// running a command on a connection returned by RetryConn, in
+	// order to automatically follow MOVED or ASK redirections. This
+	// field controls how many of those attempts are executed before
+	// returning an error.
 	MaxAttempts int
 
 	mu            sync.Mutex             // protects following fields
@@ -56,28 +59,17 @@ type Cluster struct {
 // afterwards, based on the redis commands' MOVED responses.
 func (c *Cluster) Refresh() error {
 	c.mu.Lock()
-	if err := c.err; err != nil {
-		c.mu.Unlock()
+	err := c.err
+	c.mu.Unlock()
+	if err != nil {
 		return err
 	}
 
-	// populate nodes lazily, only once
-	if c.nodes == nil {
-		c.populateNodes()
-	}
-
-	// grab a slice of addresses so we don't hold on to the lock during
-	// the CLUSTER SLOTS calls.
-	addrs := make([]string, 0, len(c.nodes))
-	for addr := range c.nodes {
-		addrs = append(addrs, addr)
-	}
-	c.mu.Unlock()
-
-	return c.refresh(addrs)
+	return c.refresh()
 }
 
-func (c *Cluster) refresh(addrs []string) error {
+func (c *Cluster) refresh() error {
+	addrs := c.getNodeAddrs()
 	for _, addr := range addrs {
 		m, err := c.getClusterSlots(addr)
 		if err == nil {
@@ -99,39 +91,14 @@ func (c *Cluster) refresh(addrs []string) error {
 					delete(c.nodes, k)
 				}
 			}
+			// mark that no refresh is needed until another MOVED
+			c.refreshNeeded = false
 			c.mu.Unlock()
 
 			return nil
 		}
 	}
 	return errors.New("redisc: all nodes failed")
-}
-
-func (c *Cluster) getConnForAddr(addr string) (redis.Conn, error) {
-	// non-pooled doesn't require a lock
-	if c.CreatePool == nil {
-		return redis.Dial("tcp", addr, c.DialOptions...)
-	}
-
-	c.mu.Lock()
-
-	p := c.pools[addr]
-	if p == nil {
-		c.mu.Unlock()
-		pool, err := c.CreatePool(addr, c.DialOptions...)
-		if err != nil {
-			return nil, err
-		}
-
-		c.mu.Lock()
-		c.pools[addr] = pool
-		p = pool
-	}
-
-	c.mu.Unlock()
-
-	conn := p.Get()
-	return conn, conn.Err()
 }
 
 type slotMapping struct {
@@ -175,11 +142,83 @@ func (c *Cluster) getClusterSlots(addr string) ([]slotMapping, error) {
 	return m, nil
 }
 
-func (c *Cluster) populateNodes() {
-	c.nodes = make(map[string]bool)
-	for _, n := range c.StartupNodes {
-		c.nodes[n] = true
+func (c *Cluster) getConnForAddr(addr string) (redis.Conn, error) {
+	// non-pooled doesn't require a lock
+	if c.CreatePool == nil {
+		return redis.Dial("tcp", addr, c.DialOptions...)
 	}
+
+	c.mu.Lock()
+
+	p := c.pools[addr]
+	if p == nil {
+		c.mu.Unlock()
+		pool, err := c.CreatePool(addr, c.DialOptions...)
+		if err != nil {
+			return nil, err
+		}
+
+		c.mu.Lock()
+		c.pools[addr] = pool
+		p = pool
+	}
+
+	c.mu.Unlock()
+
+	conn := p.Get()
+	return conn, conn.Err()
+}
+
+func (c *Cluster) getConnForSlot(slot int) (redis.Conn, error) {
+	c.mu.Lock()
+	addr := c.mapping[slot]
+	c.mu.Unlock()
+	if addr == "" {
+		return nil, errors.New("redisc: no node for slot " + strconv.Itoa(slot))
+	}
+	return c.getConnForAddr(addr)
+}
+
+func (c *Cluster) getRandomConn() (redis.Conn, error) {
+	addrs := c.getNodeAddrs()
+	perms := rnd.Perm(len(addrs))
+	for _, ix := range perms {
+		addr := addrs[ix]
+		conn, err := c.getConnForAddr(addr)
+		if err == nil {
+			return conn, nil
+		}
+	}
+	return nil, errors.New("redisc: failed to get a connection")
+}
+
+func (c *Cluster) getConn(preferredSlot int) (redis.Conn, error) {
+	conn, err := c.getConnForSlot(preferredSlot)
+	if err != nil {
+		conn, err = c.getRandomConn()
+	}
+	return conn, err
+}
+
+func (c *Cluster) getNodeAddrs() []string {
+	c.mu.Lock()
+
+	// populate nodes lazily, only once
+	if c.nodes == nil {
+		c.nodes = make(map[string]bool)
+		for _, n := range c.StartupNodes {
+			c.nodes[n] = true
+		}
+	}
+
+	// grab a slice of addresses
+	addrs := make([]string, 0, len(c.nodes))
+	for addr := range c.nodes {
+		addrs = append(addrs, addr)
+	}
+	c.mu.Unlock()
+
+	return addrs
 }
 
 // Dial returns a connection the same way as Cluster.Get, but
