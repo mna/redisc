@@ -31,11 +31,20 @@ type Cluster struct {
 	// is called.
 	CreatePool func(address string, options ...redis.DialOption) (*redis.Pool, error)
 
-	mu      sync.Mutex // protects following fields
-	err     error
-	pools   map[string]*redis.Pool
-	nodes   map[string]bool
-	mapping [hashSlots]string // hash slot number to master server address
+	// MaxAttempts is the maximum number of attempts allowed when
+	// running a command. If the cluster is moving slots around in
+	// its nodes, it may reply to a command with a MOVED or ASK error,
+	// in which case the package retries with the redis-specified
+	// node. This field controls how many of those attempts are executed
+	// before returning an error.
+	MaxAttempts int
+
+	mu            sync.Mutex             // protects following fields
+	err           error                  // broken connection error
+	pools         map[string]*redis.Pool // created pools per node
+	nodes         map[string]bool        // set of known active nodes, kept up-to-date
+	mapping       [hashSlots]string      // hash slot number to master server address
+	refreshNeeded bool                   // refresh mapping on next command
 }
 
 // Refresh updates the cluster's internal mapping of hash slots
@@ -178,6 +187,14 @@ func (c *Cluster) populateNodes() {
 // pool, even if Cluster.CreatePool is set. The actual returned
 // type is *redisc.Conn, see its documentation for details.
 func (c *Cluster) Dial() (redis.Conn, error) {
+	c.mu.Lock()
+	err := c.err
+	c.mu.Unlock()
+
+	if err != nil {
+		return nil, err
+	}
+
 	return &Conn{
 		cluster:   c,
 		forceDial: true,
@@ -189,8 +206,13 @@ func (c *Cluster) Dial() (redis.Conn, error) {
 // returned connection. The actual returned type is *redisc.Conn,
 // see its documentation for details.
 func (c *Cluster) Get() redis.Conn {
+	c.mu.Lock()
+	err := c.err
+	c.mu.Unlock()
+
 	return &Conn{
 		cluster: c,
+		err:     err,
 	}
 }
 

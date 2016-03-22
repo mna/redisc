@@ -1,5 +1,6 @@
 // Package redisc implements a redis cluster client on top of
-// the redigo client package.
+// the redigo client package. It supports all commands that can
+// be executed on a redis cluster, including pub-sub and scripts.
 //
 // Cluster
 //
@@ -59,5 +60,25 @@
 //
 // The connection must be closed after use, to release the underlying
 // resources.
+//
+// Redirections
+//
+// The redis cluster may return MOVED and ASK errors when the node
+// that received the command doesn't currently hold the slot corresponding
+// to the key. The package cannot reliably handle those redirections
+// automatically because the redirection error may be returned for
+// a pipeline of commands, some of which may have succeeded.
+//
+// However, a connection can be wrapped by a call to RetryConn, which
+// returns a redis.Conn interface where only calls to Do, Close and Err
+// succeed. That means pipelining is not supported, and only a single
+// command can be executed at a time, but it will automatically handle
+// MOVED and ASK replies, up to Cluster.MaxAttempts. It also supports
+// script execution by passing this connection to redigo's redis.Script.Do,
+// which only calls the Do method of the connection.
+//
+// Note that even if RetryConn is not used, the cluster always updates
+// its mapping of slots to nodes automatically by keeping track of
+// MOVED replies.
 //
 package redisc

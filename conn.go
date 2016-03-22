@@ -25,6 +25,7 @@ var _ redis.Conn = (*Conn)(nil)
 //
 // Because Cluster.Get and Cluster.Dial return a redis.Conn interface,
 // a type assertion must be used to call Bind on this concrete Conn type:
+//
 //     redisConn := cluster.Get()
 //     if conn, ok := redisConn.(*redisc.Conn); ok {
 //       if err := conn.Bind("my-key"); err != nil {
