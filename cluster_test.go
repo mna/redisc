@@ -163,6 +163,25 @@ func TestCommands(t *testing.T) {
 			{"TYPE", redis.Args{"k1"}, "string", ""},
 			{"DEL", redis.Args{"k1"}, int64(1), ""},
 		},
+		"lists": {
+			{"LPUSH", redis.Args{"l1", "a", "b", "c"}, int64(3), ""},
+			{"LINDEX", redis.Args{"l1", 1}, []byte("b"), ""},
+			{"LINSERT", redis.Args{"l1", "BEFORE", "b", "d"}, int64(4), ""},
+			{"LLEN", redis.Args{"l1"}, int64(4), ""},
+			{"LPOP", redis.Args{"l1"}, []byte("c"), ""},
+			{"LPUSHX", redis.Args{"l1", "e"}, int64(4), ""},
+			{"LRANGE", redis.Args{"l1", 0, 1}, []interface{}{[]byte("e"), []byte("d")}, ""},
+			{"LREM", redis.Args{"l1", 0, "d"}, int64(1), ""},
+			{"LSET", redis.Args{"l1", 0, "f"}, "OK", ""},
+			{"LTRIM", redis.Args{"l1", 0, 3}, "OK", ""},
+			{"RPOP", redis.Args{"l1"}, []byte("a"), ""},
+			{"RPOPLPUSH", redis.Args{"l1", "l2"}, nil, "CROSSSLOT Keys in request don't hash to the same slot"},
+			{"RPUSH", redis.Args{"l1", "g"}, int64(3), ""},
+			{"RPUSH", redis.Args{"l1", "h"}, int64(4), ""},
+			{"BLPOP", redis.Args{"l1", 1}, lenResult(2), ""},
+			{"BRPOP", redis.Args{"l1", 1}, lenResult(2), ""},
+			{"BRPOPLPUSH", redis.Args{"l1", "l2", 1}, nil, "CROSSSLOT Keys in request don't hash to the same slot"},
+		},
 	}
 
 	for i, p := range ports {
