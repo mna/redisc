@@ -9,6 +9,7 @@ import (
 	"github.com/PuerkitoBio/juggler/internal/redistest"
 	"github.com/garyburd/redigo/redis"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestClusterRefreshNormalServer(t *testing.T) {
@@ -132,6 +133,7 @@ func TestCommands(t *testing.T) {
 		DialOptions:  []redis.DialOption{redis.DialConnectTimeout(2 * time.Second)},
 		CreatePool:   createPool,
 	}
+	require.NoError(t, c.Refresh(), "Refresh")
 
 	var wg sync.WaitGroup
 	wg.Add(len(cmdsPerGroup))
