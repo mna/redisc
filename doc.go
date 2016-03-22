@@ -12,8 +12,8 @@
 //
 // If the Cluster.CreatePool function field is set, then a
 // redis.Pool is created to manage connections to each of the
-// cluster's nodes. A call to Cluster.Get then returns a connection
-// from this pool.
+// cluster's nodes. A call to Cluster.Get returns a connection
+// from that pool.
 //
 // The Cluster.Dial method, on the other hand, guarantees that
 // the returned connection will not be managed by a pool, even if
@@ -27,9 +27,9 @@
 //
 // Connection
 //
-// The connection returned from Get or Dial is a redigo's redis.Conn
-// interface, with a concrete type of *Conn. In addition to the interface's
-// required methods, *Conn adds the Bind method.
+// The connection returned from Get or Dial is a redigo redis.Conn
+// interface, with a concrete type of *Conn. In addition to the
+// interface's required methods, *Conn adds the Bind method.
 //
 // The returned connection is not yet connected to any node; it is
 // "bound" to a specific node only when a call to Do, Send, Receive
@@ -71,9 +71,9 @@
 //
 // However, a connection can be wrapped by a call to RetryConn, which
 // returns a redis.Conn interface where only calls to Do, Close and Err
-// succeed. That means pipelining is not supported, and only a single
+// can succeed. That means pipelining is not supported, and only a single
 // command can be executed at a time, but it will automatically handle
-// MOVED and ASK replies, up to Cluster.MaxAttempts. It also supports
+// MOVED and ASK replies, as well as TRYAGAIN errors. It also supports
 // script execution by passing this connection to redigo's redis.Script.Do,
 // which only calls the Do method of the connection.
 //
