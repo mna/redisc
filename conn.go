@@ -54,8 +54,13 @@ func (c *Conn) bind(slot int) (rc redis.Conn, ok bool, err error) {
 	rc, err = c.rc, c.err
 	if err == nil {
 		if rc == nil {
-			// TODO : if -1, random, otherwise c.cluster.mapping[slot]
-			ok = true
+			conn, err2 := c.cluster.getConn(slot)
+			if err2 != nil {
+				err = err2
+			} else {
+				c.rc = conn
+				ok = true
+			}
 		}
 	}
 	c.mu.Unlock()

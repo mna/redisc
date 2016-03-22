@@ -192,9 +192,11 @@ func (c *Cluster) getRandomConn() (redis.Conn, error) {
 	return nil, errors.New("redisc: failed to get a connection")
 }
 
-func (c *Cluster) getConn(preferredSlot int) (redis.Conn, error) {
-	conn, err := c.getConnForSlot(preferredSlot)
-	if err != nil {
+func (c *Cluster) getConn(preferredSlot int) (conn redis.Conn, err error) {
+	if preferredSlot >= 0 {
+		conn, err = c.getConnForSlot(preferredSlot)
+	}
+	if preferredSlot < 0 || err != nil {
 		conn, err = c.getRandomConn()
 	}
 	return conn, err
