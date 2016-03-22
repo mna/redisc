@@ -57,7 +57,7 @@ func (rc *retryConn) do(cmd string, args ...interface{}) (interface{}, error) {
 		}
 
 		// handle redirection
-		conn, err := cluster.getConnForSlot(re.NewSlot)
+		conn, err := cluster.getConnForSlot(re.NewSlot, rc.c.forceDial)
 		if err != nil {
 			// could not get connection to that node, return the Do result
 			return v, err

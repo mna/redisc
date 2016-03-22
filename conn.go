@@ -110,7 +110,7 @@ func (c *Conn) bind(slot int) (rc redis.Conn, ok bool, err error) {
 	rc, err = c.rc, c.err
 	if err == nil {
 		if rc == nil {
-			conn, err2 := c.cluster.getConn(slot)
+			conn, err2 := c.cluster.getConn(slot, c.forceDial)
 			if err2 != nil {
 				err = err2
 			} else {

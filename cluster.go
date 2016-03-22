@@ -117,7 +117,7 @@ type slotMapping struct {
 }
 
 func (c *Cluster) getClusterSlots(addr string) ([]slotMapping, error) {
-	conn, err := c.getConnForAddr(addr)
+	conn, err := c.getConnForAddr(addr, false)
 	if err != nil {
 		return nil, err
 	}
@@ -152,9 +152,9 @@ func (c *Cluster) getClusterSlots(addr string) ([]slotMapping, error) {
 	return m, nil
 }
 
-func (c *Cluster) getConnForAddr(addr string) (redis.Conn, error) {
+func (c *Cluster) getConnForAddr(addr string, forceDial bool) (redis.Conn, error) {
 	// non-pooled doesn't require a lock
-	if c.CreatePool == nil {
+	if c.CreatePool == nil || forceDial {
 		return redis.Dial("tcp", addr, c.DialOptions...)
 	}
 
@@ -179,22 +179,22 @@ func (c *Cluster) getConnForAddr(addr string) (redis.Conn, error) {
 	return conn, conn.Err()
 }
 
-func (c *Cluster) getConnForSlot(slot int) (redis.Conn, error) {
+func (c *Cluster) getConnForSlot(slot int, forceDial bool) (redis.Conn, error) {
 	c.mu.Lock()
 	addr := c.mapping[slot]
 	c.mu.Unlock()
 	if addr == "" {
 		return nil, errors.New("redisc: no node for slot " + strconv.Itoa(slot))
 	}
-	return c.getConnForAddr(addr)
+	return c.getConnForAddr(addr, forceDial)
 }
 
-func (c *Cluster) getRandomConn() (redis.Conn, error) {
+func (c *Cluster) getRandomConn(forceDial bool) (redis.Conn, error) {
 	addrs := c.getNodeAddrs()
 	perms := rnd.Perm(len(addrs))
 	for _, ix := range perms {
 		addr := addrs[ix]
-		conn, err := c.getConnForAddr(addr)
+		conn, err := c.getConnForAddr(addr, forceDial)
 		if err == nil {
 			return conn, nil
 		}
@@ -202,12 +202,12 @@ func (c *Cluster) getRandomConn() (redis.Conn, error) {
 	return nil, errors.New("redisc: failed to get a connection")
 }
 
-func (c *Cluster) getConn(preferredSlot int) (conn redis.Conn, err error) {
+func (c *Cluster) getConn(preferredSlot int, forceDial bool) (conn redis.Conn, err error) {
 	if preferredSlot >= 0 {
-		conn, err = c.getConnForSlot(preferredSlot)
+		conn, err = c.getConnForSlot(preferredSlot, forceDial)
 	}
 	if preferredSlot < 0 || err != nil {
-		conn, err = c.getRandomConn()
+		conn, err = c.getRandomConn(forceDial)
 	}
 	return conn, err
 }
