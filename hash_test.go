@@ -1,6 +1,7 @@
 package redisc
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -39,5 +40,36 @@ func TestSlot(t *testing.T) {
 	for _, c := range cases {
 		got := Slot(c.in)
 		assert.Equal(t, c.out, got, c.in)
+	}
+}
+
+func TestSplitBySlot(t *testing.T) {
+	cases := []struct {
+		// join/split by comma, for convenience
+		in  string
+		out []string
+	}{
+		{"", nil},
+		{"a", []string{"a"}},
+		{"a,b", []string{"b", "a"}},
+		{"a,b,cb{a}", []string{"b", "a,cb{a}"}},
+		{"a,b,cb{a},a{b}", []string{"b,a{b}", "a,cb{a}"}},
+		{"a,b,cb{a},a{b},abc", []string{"b,a{b}", "abc", "a,cb{a}"}},
+	}
+
+	for _, c := range cases {
+		args := strings.Split(c.in, ",")
+		if c.in == "" {
+			args = nil
+		}
+		got := SplitBySlot(args...)
+
+		exp := make([][]string, len(c.out))
+		for i, o := range c.out {
+			exp[i] = strings.Split(o, ",")
+		}
+
+		assert.Equal(t, exp, got, c.in)
+		t.Logf("%#v", got)
 	}
 }

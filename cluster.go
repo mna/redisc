@@ -178,7 +178,10 @@ func (c *Cluster) populateNodes() {
 // pool, even if Cluster.CreatePool is set. The actual returned
 // type is *redisc.Conn, see its documentation for details.
 func (c *Cluster) Dial() (redis.Conn, error) {
-	return nil, nil
+	return &Conn{
+		cluster:   c,
+		forceDial: true,
+	}, nil
 }
 
 // Get returns a redis.Conn interface that can be used to call
@@ -186,7 +189,9 @@ func (c *Cluster) Dial() (redis.Conn, error) {
 // returned connection. The actual returned type is *redisc.Conn,
 // see its documentation for details.
 func (c *Cluster) Get() redis.Conn {
-	return nil
+	return &Conn{
+		cluster: c,
+	}
 }
 
 // Close releases the resources used by the cluster. It closes all the
