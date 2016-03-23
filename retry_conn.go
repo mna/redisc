@@ -66,10 +66,13 @@ func (rc *retryConn) do(cmd string, args ...interface{}) (interface{}, error) {
 			// could not get connection to that node, return that error
 			return nil, err
 		}
+
 		rc.c.mu.Lock()
-		// TODO : close previous conn
+		// close and replace the old connection
+		rc.c.rc.Close()
 		rc.c.rc = conn
 		rc.c.mu.Unlock()
+
 		asking = re.Type == "ASK"
 
 		att++

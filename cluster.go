@@ -97,6 +97,7 @@ func (c *Cluster) refresh() error {
 	c.mu.Lock()
 	c.refreshing = false
 	c.mu.Unlock()
+
 	return errors.New("redisc: all nodes failed")
 }
 
@@ -127,6 +128,7 @@ func (c *Cluster) getClusterSlots(addr string) ([]slotMapping, error) {
 		return nil, err
 	}
 	defer conn.Close()
+
 	vals, err := redis.Values(conn.Do("CLUSTER", "SLOTS"))
 	if err != nil {
 		return nil, err
@@ -199,6 +201,7 @@ func (c *Cluster) getConnForSlot(slot int, forceDial bool) (redis.Conn, error) {
 	return c.getConnForAddr(addr, forceDial)
 }
 
+// a *rand.Rand is not safe for concurrent access
 var rnd = struct {
 	sync.Mutex
 	*rand.Rand
