@@ -12,8 +12,8 @@ import (
 
 var _ redis.Conn = (*Conn)(nil)
 
-// Conn is a redis cluster connection. When returned by Cluster.Get
-// or Cluster.Dial, it is not yet bound to any node in the cluster.
+// Conn is a redis cluster connection. When returned by Get
+// or Dial, it is not yet bound to any node in the cluster.
 // Only when a call to Do, Send, Receive or Bind is made is a connection
 // to a specific node established:
 //
@@ -25,8 +25,8 @@ var _ redis.Conn = (*Conn)(nil)
 //     - if Bind is called first, the node corresponding to the slot of
 //       the specified key(s) is selected
 //
-// Because Cluster.Get and Cluster.Dial return a redis.Conn interface,
-// a type assertion must be used to call Bind on this concrete Conn type:
+// Because Get and Dial return a redis.Conn interface,
+// a type assertion can be used to call Bind on this concrete Conn type:
 //
 //     redisConn := cluster.Get()
 //     if conn, ok := redisConn.(*redisc.Conn); ok {
@@ -34,6 +34,8 @@ var _ redis.Conn = (*Conn)(nil)
 //         // handle error
 //       }
 //     }
+//
+// Or call the package-level BindConn helper function.
 //
 type Conn struct {
 	cluster   *Cluster

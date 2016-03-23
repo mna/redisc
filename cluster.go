@@ -14,7 +14,7 @@ const hashSlots = 16384
 
 // Cluster manages a redis cluster. If the CreatePool field is not nil,
 // a redis.Pool is used for each node in the cluster to get connections
-// via Cluster.Get. If it is nil or if Cluster.Dial is called, redis.Dial
+// via Get. If it is nil or if Dial is called, redis.Dial
 // is used to get the connection.
 type Cluster struct {
 	// StartupNodes is the list of initial nodes that make up
@@ -29,8 +29,7 @@ type Cluster struct {
 	// the specified TCP address, using the provided options
 	// as set in DialOptions. If this field is not nil, a
 	// redis.Pool is created for each node in the cluster and the
-	// pool is used to manage the connections unless Cluster.Dial
-	// is called.
+	// pool is used to manage the connections returned by Get.
 	CreatePool func(address string, options ...redis.DialOption) (*redis.Pool, error)
 
 	mu         sync.Mutex             // protects following fields
@@ -257,10 +256,10 @@ func (c *Cluster) getNodeAddrs() []string {
 	return addrs
 }
 
-// Dial returns a connection the same way as Cluster.Get, but
+// Dial returns a connection the same way as Get, but
 // it guarantees that the connection will not be managed by the
-// pool, even if Cluster.CreatePool is set. The actual returned
-// type is *redisc.Conn, see its documentation for details.
+// pool, even if CreatePool is set. The actual returned
+// type is *Conn, see its documentation for details.
 func (c *Cluster) Dial() (redis.Conn, error) {
 	c.mu.Lock()
 	err := c.err
@@ -278,7 +277,7 @@ func (c *Cluster) Dial() (redis.Conn, error) {
 
 // Get returns a redis.Conn interface that can be used to call
 // redis commands on the cluster. The application must close the
-// returned connection. The actual returned type is *redisc.Conn,
+// returned connection. The actual returned type is *Conn,
 // see its documentation for details.
 func (c *Cluster) Get() redis.Conn {
 	c.mu.Lock()

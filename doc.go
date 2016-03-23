@@ -1,6 +1,7 @@
 // Package redisc implements a redis cluster client on top of
 // the redigo client package. It supports all commands that can
 // be executed on a redis cluster, including pub-sub and scripts.
+// See http://redis.io/topics/cluster-spec for details.
 //
 // Cluster
 //
@@ -84,9 +85,7 @@
 // returns a redis.Conn interface where only calls to Do, Close and Err
 // can succeed. That means pipelining is not supported, and only a single
 // command can be executed at a time, but it will automatically handle
-// MOVED and ASK replies, as well as TRYAGAIN errors. It also supports
-// script execution by passing this connection to redigo's redis.Script.Do,
-// which only calls the Do method of the connection.
+// MOVED and ASK replies, as well as TRYAGAIN errors.
 //
 // Note that even if RetryConn is not used, the cluster always updates
 // its mapping of slots to nodes automatically by keeping track of

@@ -428,9 +428,7 @@ func runScriptCommands(t *testing.T, c *Cluster, wg *sync.WaitGroup) {
 
 	conn := c.Get()
 	defer conn.Close()
-	if conn, ok := conn.(*Conn); ok {
-		require.NoError(t, conn.Bind("scr{a}1", "src{a}2"), "Bind")
-	}
+	require.NoError(t, BindConn(conn, "scr{a}1", "src{a}2"), "Bind")
 
 	// script.Do, send the whole script
 	v, err := script.Do(conn, "scr{a}1", "scr{a}2", "x", "y")
