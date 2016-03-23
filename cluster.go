@@ -33,12 +33,12 @@ type Cluster struct {
 	// is called.
 	CreatePool func(address string, options ...redis.DialOption) (*redis.Pool, error)
 
-	mu              sync.Mutex             // protects following fields
-	err             error                  // broken connection error
-	pools           map[string]*redis.Pool // created pools per node
-	nodes           map[string]bool        // set of known active nodes, kept up-to-date
-	mapping         [hashSlots]string      // hash slot number to master server address
-	noRefreshNeeded bool                   // do not refresh mapping on next command (so refresh IS needed initially)
+	mu         sync.Mutex             // protects following fields
+	err        error                  // broken connection error
+	pools      map[string]*redis.Pool // created pools per node
+	nodes      map[string]bool        // set of known active nodes, kept up-to-date
+	mapping    [hashSlots]string      // hash slot number to master server address
+	refreshing bool                   // indicates if there's a refresh in progress
 }
 
 // Refresh updates the cluster's internal mapping of hash slots
@@ -52,7 +52,7 @@ func (c *Cluster) Refresh() error {
 	c.mu.Lock()
 	err := c.err
 	if err == nil {
-		c.noRefreshNeeded = false // avoid creating concurrent refresh goroutines
+		c.refreshing = true
 	}
 	c.mu.Unlock()
 	if err != nil {
@@ -86,12 +86,17 @@ func (c *Cluster) refresh() error {
 				}
 			}
 			// mark that no refresh is needed until another MOVED
-			c.noRefreshNeeded = true
+			c.refreshing = false
 			c.mu.Unlock()
 
 			return nil
 		}
 	}
+
+	// reset the refreshing flag
+	c.mu.Lock()
+	c.refreshing = false
+	c.mu.Unlock()
 	return errors.New("redisc: all nodes failed")
 }
 
@@ -101,11 +106,11 @@ func (c *Cluster) needsRefresh(re *RedirError) {
 	if re != nil {
 		c.mapping[re.NewSlot] = re.Addr
 	}
-	if c.noRefreshNeeded {
-		// noRefreshNeeded is reset to true only once the goroutine has
+	if !c.refreshing {
+		// refreshing is reset to only once the goroutine has
 		// finished updating the mapping, so a new refresh goroutine
 		// will only be started if none is running.
-		c.noRefreshNeeded = false
+		c.refreshing = true
 		go c.refresh()
 	}
 	c.mu.Unlock()

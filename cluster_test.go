@@ -54,6 +54,49 @@ func TestClusterRefresh(t *testing.T) {
 	}
 }
 
+func TestClusterNeedsRefresh(t *testing.T) {
+	fn, ports := redistest.StartCluster(t, nil)
+	defer fn()
+
+	for i, p := range ports {
+		ports[i] = ":" + p
+	}
+	c := &Cluster{
+		StartupNodes: ports,
+	}
+	defer c.Close()
+
+	conn := c.Get().(*Conn)
+	defer conn.Close()
+
+	// at this point, no mapping is stored
+	c.mu.Lock()
+	for i, v := range c.mapping {
+		if !assert.Empty(t, v, "No addr for %d", i) {
+			break
+		}
+	}
+	c.mu.Unlock()
+
+	// calling Do may or may not generate a MOVED error (it will get a
+	// random node, because no mapping is known yet)
+	conn.Do("GET", "b")
+
+	// wait for refreshing to become false again
+	c.mu.Lock()
+	for c.refreshing {
+		c.mu.Unlock()
+		time.Sleep(100 * time.Millisecond)
+		c.mu.Lock()
+	}
+	for i, v := range c.mapping {
+		if !assert.NotEmpty(t, v, "Addr for %d", i) {
+			break
+		}
+	}
+	c.mu.Unlock()
+}
+
 func TestClusterClose(t *testing.T) {
 	c := &Cluster{
 		StartupNodes: []string{":6379"},
