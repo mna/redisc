@@ -67,6 +67,7 @@ func (rc *retryConn) do(cmd string, args ...interface{}) (interface{}, error) {
 			return nil, err
 		}
 		rc.c.mu.Lock()
+		// TODO : close previous conn
 		rc.c.rc = conn
 		rc.c.mu.Unlock()
 		asking = re.Type == "ASK"
