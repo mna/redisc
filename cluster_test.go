@@ -244,6 +244,8 @@ func TestCommands(t *testing.T) {
 	wg.Wait()
 	close(done)
 	<-ok
+
+	assert.NoError(t, c.Close(), "Cluster Close")
 }
 
 func runPubSubCommands(t *testing.T, c *Cluster, steps, stop chan int) {
