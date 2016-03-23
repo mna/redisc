@@ -141,7 +141,7 @@ func TestCommands(t *testing.T) {
 			{"PFADD", redis.Args{"hll", "a", "b", "c"}, int64(1), ""},
 			{"PFCOUNT", redis.Args{"hll"}, int64(3), ""},
 			{"PFADD", redis.Args{"hll2", "d"}, int64(1), ""},
-			{"PFMERGE", redis.Args{"hll", "hll2"}, nil, "CROSSSLOT Keys in request don't hash to the same slot"},
+			{"PFMERGE", redis.Args{"hll", "hll2"}, nil, "CROSSSLOT"},
 		},
 		"keys": {
 			{"SET", redis.Args{"k1", "z"}, "OK", ""},
@@ -156,12 +156,14 @@ func TestCommands(t *testing.T) {
 			{"PEXPIREAT", redis.Args{"k1", time.Now().Add(time.Hour).UnixNano() / int64(time.Millisecond)}, int64(1), ""},
 			{"PTTL", redis.Args{"k1"}, lenResult(3500000), ""},
 			// RANDOMKEY is not deterministic
-			{"RENAME", redis.Args{"k1", "k2"}, nil, "CROSSSLOT Keys in request don't hash to the same slot"},
-			{"RENAMENX", redis.Args{"k1", "k2"}, nil, "CROSSSLOT Keys in request don't hash to the same slot"},
+			{"RENAME", redis.Args{"k1", "k2"}, nil, "CROSSSLOT"},
+			{"RENAMENX", redis.Args{"k1", "k2"}, nil, "CROSSSLOT"},
 			{"SCAN", redis.Args{0}, lenResult(2), ""}, // works, but only for the keys on that random node
 			{"TTL", redis.Args{"k1"}, lenResult(3000), ""},
 			{"TYPE", redis.Args{"k1"}, "string", ""},
 			{"DEL", redis.Args{"k1"}, int64(1), ""},
+			{"SADD", redis.Args{"k3", "a", "z", "d"}, int64(3), ""},
+			{"SORT", redis.Args{"k3", "ALPHA"}, []interface{}{[]byte("a"), []byte("d"), []byte("z")}, ""},
 		},
 		"lists": {
 			{"LPUSH", redis.Args{"l1", "a", "b", "c"}, int64(3), ""},
@@ -175,12 +177,12 @@ func TestCommands(t *testing.T) {
 			{"LSET", redis.Args{"l1", 0, "f"}, "OK", ""},
 			{"LTRIM", redis.Args{"l1", 0, 3}, "OK", ""},
 			{"RPOP", redis.Args{"l1"}, []byte("a"), ""},
-			{"RPOPLPUSH", redis.Args{"l1", "l2"}, nil, "CROSSSLOT Keys in request don't hash to the same slot"},
+			{"RPOPLPUSH", redis.Args{"l1", "l2"}, nil, "CROSSSLOT"},
 			{"RPUSH", redis.Args{"l1", "g"}, int64(3), ""},
 			{"RPUSH", redis.Args{"l1", "h"}, int64(4), ""},
 			{"BLPOP", redis.Args{"l1", 1}, lenResult(2), ""},
 			{"BRPOP", redis.Args{"l1", 1}, lenResult(2), ""},
-			{"BRPOPLPUSH", redis.Args{"l1", "l2", 1}, nil, "CROSSSLOT Keys in request don't hash to the same slot"},
+			{"BRPOPLPUSH", redis.Args{"l1", "l2", 1}, nil, "CROSSSLOT"},
 		},
 		"pubsub": {
 			{"PUBSUB", redis.Args{"NUMPAT"}, lenResult(0), ""},
@@ -215,6 +217,36 @@ func TestCommands(t *testing.T) {
 			{"SUNION", redis.Args{"{t1}.b", "{t1}.c"}, lenResult(3), ""},
 			{"SUNIONSTORE", redis.Args{"{t1}.d", "{t1}.b", "{t1}.c"}, int64(3), ""},
 		},
+		"sortedsets": {
+			{"ZADD", redis.Args{"z1", 1, "m1", 2, "m2", 3, "m3"}, int64(3), ""},
+			{"ZCARD", redis.Args{"z1"}, int64(3), ""},
+			{"ZCOUNT", redis.Args{"z1", "(1", "3"}, int64(2), ""},
+			{"ZINCRBY", redis.Args{"z1", 1, "m1"}, []byte("2"), ""},
+			{"ZINTERSTORE", redis.Args{"z2", 1, "z1"}, nil, "CROSSSLOT"},
+			{"ZLEXCOUNT", redis.Args{"z1", "[m1", "[m2"}, int64(2), ""},
+			{"ZRANGE", redis.Args{"z1", 0, 0}, []interface{}{[]byte("m1")}, ""},
+			{"ZRANGEBYLEX", redis.Args{"z1", "[m1", "(m2"}, []interface{}{[]byte("m1")}, ""},
+			{"ZRANGEBYSCORE", redis.Args{"z1", "(2", "3"}, []interface{}{[]byte("m3")}, ""},
+			{"ZRANK", redis.Args{"z1", "m3"}, int64(2), ""},
+			{"ZREM", redis.Args{"z1", "m1"}, int64(1), ""},
+			// TODO : complete commands...
+			{"ZSCORE", redis.Args{"z1", "m3"}, []byte("3"), ""},
+		},
+		"strings": {
+			{"APPEND", redis.Args{"s1", "a"}, int64(1), ""},
+			{"BITCOUNT", redis.Args{"s1"}, int64(3), ""},
+			{"GET", redis.Args{"s1"}, []byte("a"), ""},
+			// TODO : complete commands...
+		},
+		"transactions": {
+			{"DISCARD", nil, "", "ERR DISCARD without MULTI"},
+			{"EXEC", nil, "", "ERR EXEC without MULTI"},
+			{"MULTI", nil, "OK", ""},
+			{"SET", redis.Args{"tr1", 1}, "OK", ""},
+			{"WATCH", redis.Args{"tr1"}, "OK", ""},
+			{"UNWATCH", nil, "OK", ""},
+			// to actually use transactions, conn.Bind must be called to select the right node
+		},
 	}
 
 	for i, p := range ports {
@@ -238,14 +270,43 @@ func TestCommands(t *testing.T) {
 	for _, cmds := range cmdsPerGroup {
 		go runCommands(t, c, cmds, &wg)
 	}
-	wg.Add(1)
+	wg.Add(2)
 	go runScriptCommands(t, c, &wg)
+	go runTransactionsCommands(t, c, &wg)
 
 	wg.Wait()
 	close(done)
 	<-ok
 
 	assert.NoError(t, c.Close(), "Cluster Close")
+}
+
+func runTransactionsCommands(t *testing.T, c *Cluster, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	conn := c.Get()
+	defer conn.Close()
+	if conn, ok := conn.(*Conn); ok {
+		require.NoError(t, conn.Bind("tr{a}1", "tr{a}2"), "Bind")
+	}
+
+	_, err := conn.Do("WATCH", "tr{a}1")
+	assert.NoError(t, err, "WATCH")
+	_, err = conn.Do("MULTI")
+	assert.NoError(t, err, "MULTI")
+	_, err = conn.Do("SET", "tr{a}1", "a")
+	assert.NoError(t, err, "SET 1")
+	_, err = conn.Do("SET", "tr{a}2", "b")
+	assert.NoError(t, err, "SET 2")
+	_, err = conn.Do("EXEC")
+	assert.NoError(t, err, "EXEC")
+
+	v, err := redis.Strings(conn.Do("MGET", "tr{a}1", "tr{a}2"))
+	assert.NoError(t, err, "MGET")
+	if assert.Equal(t, 2, len(v), "Number of MGET results") {
+		assert.Equal(t, "a", v[0], "MGET[0]")
+		assert.Equal(t, "b", v[1], "MGET[1]")
+	}
 }
 
 func runPubSubCommands(t *testing.T, c *Cluster, steps, stop chan int) {
