@@ -193,6 +193,27 @@ func TestCommands(t *testing.T) {
 		},
 		"server": {
 			{"CLIENT", redis.Args{"LIST"}, lenResult(10), ""},
+			{"COMMAND", nil, lenResult(50), ""},
+			{"INFO", nil, lenResult(100), ""},
+			{"TIME", nil, lenResult(2), ""},
+		},
+		"sets": {
+			{"SADD", redis.Args{"t1", "a", "b"}, int64(2), ""},
+			{"SADD", redis.Args{"{t1}.b", "c", "b"}, int64(2), ""},
+			{"SCARD", redis.Args{"t1"}, int64(2), ""},
+			{"SDIFF", redis.Args{"t1", "t2"}, nil, "CROSSSLOT"},
+			{"SDIFFSTORE", redis.Args{"{t1}.3", "t1", "{t1}.2"}, int64(2), ""},
+			{"SINTER", redis.Args{"t1", "{t1}.b"}, []interface{}{[]byte("b")}, ""},
+			{"SINTERSTORE", redis.Args{"{t1}.c", "t1", "{t1}.b"}, int64(1), ""},
+			{"SISMEMBER", redis.Args{"t1", "a"}, int64(1), ""},
+			{"SMEMBERS", redis.Args{"t1"}, lenResult(2), ""}, // order is not deterministic
+			{"SMOVE", redis.Args{"t1", "{t1}.c", "a"}, int64(1), ""},
+			{"SPOP", redis.Args{"t2"}, nil, ""},
+			{"SRANDMEMBER", redis.Args{"t2"}, nil, ""},
+			{"SREM", redis.Args{"t1", "b"}, int64(1), ""},
+			{"SSCAN", redis.Args{"{t1}.b", 0}, lenResult(2), ""},
+			{"SUNION", redis.Args{"{t1}.b", "{t1}.c"}, lenResult(3), ""},
+			{"SUNIONSTORE", redis.Args{"{t1}.d", "{t1}.b", "{t1}.c"}, int64(3), ""},
 		},
 	}
 
@@ -315,7 +336,7 @@ func runCommands(t *testing.T, c *Cluster, cmds []redisCmd, wg *sync.WaitGroup) 
 				case []byte:
 					assert.True(t, len(res) >= int(lr), "result has at least %d bytes, has %d", lr, len(res))
 				case []interface{}:
-					assert.Equal(t, int(lr), len(res), "result array has %d items, has %d", lr, len(res))
+					assert.True(t, len(res) >= int(lr), "result array has at least %d items, has %d", lr, len(res))
 				case int64:
 					assert.True(t, res >= int64(lr), "result is at least %d, is %d", lr, res)
 				default:
