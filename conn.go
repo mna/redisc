@@ -185,7 +185,6 @@ func (c *Conn) Do(cmd string, args ...interface{}) (interface{}, error) {
 		if re.Type == "MOVED" {
 			c.cluster.needsRefresh(re)
 		}
-		err = re
 	}
 
 	return v, err
@@ -217,7 +216,6 @@ func (c *Conn) Receive() (interface{}, error) {
 		if re.Type == "MOVED" {
 			c.cluster.needsRefresh(re)
 		}
-		err = re
 	}
 
 	return v, err

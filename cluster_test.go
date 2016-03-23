@@ -187,6 +187,7 @@ func TestCommands(t *testing.T) {
 		"pubsub": {
 			{"PUBSUB", redis.Args{"NUMPAT"}, lenResult(0), ""},
 			{"PUBLISH", redis.Args{"ev1", "a"}, lenResult(0), ""},
+			// to actually subscribe to events, only Send must be called, and Receive to listen (or redis.PubSubConn must be used)
 		},
 		"scripting": {
 			{"SCRIPT", redis.Args{"FLUSH"}, "OK", ""},
