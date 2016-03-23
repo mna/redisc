@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PuerkitoBio/gred/resp"
 	"github.com/PuerkitoBio/juggler/internal/redistest"
+	"github.com/PuerkitoBio/juggler/internal/redistest/resp"
 	"github.com/garyburd/redigo/redis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -24,9 +24,7 @@ func TestRetryConnAsk(t *testing.T) {
 			addr, port, _ := net.SplitHostPort(s.Addr)
 			nPort, _ := strconv.Atoi(port)
 			return resp.Array{
-				resp.Array{
-					int64(0), int64(16383), resp.Array{addr, int64(nPort)},
-				},
+				resp.Array{int64(0), int64(16383), resp.Array{addr, int64(nPort)}},
 			}
 		case "GET":
 			if atomic.LoadInt32(&asking) == 0 {
