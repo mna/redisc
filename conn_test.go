@@ -1,6 +1,7 @@
 package redisc
 
 import (
+	"io"
 	"testing"
 	"time"
 
@@ -66,4 +67,19 @@ func TestConnClose(t *testing.T) {
 	if assert.Error(t, cc.Bind("A"), "Bind after Close") {
 		assert.Contains(t, err.Error(), "redisc: closed", "expected message")
 	}
+}
+
+func TestIsRedisError(t *testing.T) {
+	err := error(redis.Error("CROSSSLOT some message"))
+	assert.True(t, IsCrossSlot(err), "CrossSlot")
+	assert.False(t, IsTryAgain(err), "CrossSlot")
+	err = redis.Error("TRYAGAIN some message")
+	assert.False(t, IsCrossSlot(err), "TryAgain")
+	assert.True(t, IsTryAgain(err), "TryAgain")
+	err = io.EOF
+	assert.False(t, IsCrossSlot(err), "EOF")
+	assert.False(t, IsTryAgain(err), "EOF")
+	err = redis.Error("ERR some error")
+	assert.False(t, IsCrossSlot(err), "ERR")
+	assert.False(t, IsTryAgain(err), "ERR")
 }

@@ -54,6 +54,15 @@ func TestClusterRefresh(t *testing.T) {
 	}
 }
 
+func TestClusterNoNode(t *testing.T) {
+	c := &Cluster{}
+	conn := c.Get()
+	_, err := conn.Do("A")
+	if assert.Error(t, err, "Do") {
+		assert.Contains(t, err.Error(), "failed to get a connection", "expected message")
+	}
+}
+
 func TestClusterNeedsRefresh(t *testing.T) {
 	fn, ports := redistest.StartCluster(t, nil)
 	defer fn()
