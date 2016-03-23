@@ -5,22 +5,30 @@
 // Cluster
 //
 // The Cluster type manages a redis cluster and offers an
-// interface compatible with redigo's redis.Pool:
+// interface compatible with redigo's redis.Pool, along with
+// a few additional methods described below:
 //
 //     - Get() redis.Conn
 //     - Close() error
 //
-// If the Cluster.CreatePool function field is set, then a
+// If the CreatePool function field is set, then a
 // redis.Pool is created to manage connections to each of the
-// cluster's nodes. A call to Cluster.Get returns a connection
+// cluster's nodes. A call to Get returns a connection
 // from that pool.
 //
-// The Cluster.Dial method, on the other hand, guarantees that
+// The Dial method, on the other hand, guarantees that
 // the returned connection will not be managed by a pool, even if
-// Cluster.CreatePool is set. It calls redigo's redis.Dial function
+// CreatePool is set. It calls redigo's redis.Dial function
 // to create the unpooled connection. If the cluster's
-// CreatePool field is nil, Cluster.Get behaves the same as
-// Cluster.Dial.
+// CreatePool field is nil, Get behaves the same as
+// Dial.
+//
+// The Refresh method refreshes the cluster's internal mapping of
+// hash slots to nodes. It should typically be called only once,
+// after the cluster is created and before it is used, so that
+// the first connections already benefit from smart routing.
+// It is automatically kept up-to-date based on the redis MOVED
+// responses afterwards.
 //
 // A cluster must be closed once it is no longer used to release
 // its resources.
@@ -43,9 +51,9 @@
 // Bind is different, it gives explicit control to the caller over
 // which node to select by specifying a list of keys that the caller
 // wishes to handle with the connection. All keys must belong to the
-// same slot, and the connection must not be already bound to a node,
+// same slot, and the connection must not already be bound to a node,
 // otherwise an error is returned. On success, the connection is
-// bound the the node holding the slot of the specified keys.
+// bound the the node holding the slot of the specified key(s).
 //
 // Because the connection is returned as a redis.Conn interface, a
 // type assertion must be used to access the underlying *Conn and
@@ -57,6 +65,9 @@
 //         // handle error
 //       }
 //     }
+//
+// The BindConn package-level function is provided as a helper for
+// this common use-case.
 //
 // The connection must be closed after use, to release the underlying
 // resources.

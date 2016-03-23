@@ -145,6 +145,19 @@ func cmdSlot(cmd string, args []interface{}) int {
 	return slot
 }
 
+// BindConn is a convenience function that checks if c implements
+// a Bind method with the right signature such as the one for
+// a *Conn, and calls that method. If c doesn't implement that
+// method, it returns an error.
+func BindConn(c redis.Conn, keys ...string) error {
+	if cc, ok := c.(interface {
+		Bind(...string) error
+	}); ok {
+		return cc.Bind(keys...)
+	}
+	return errors.New("redisc: no Bind method")
+}
+
 // Bind binds the connection to the cluster node corresponding to
 // the slot of the provided keys. If the keys don't belong to the
 // same slot, an error is returned and the connection is not bound.

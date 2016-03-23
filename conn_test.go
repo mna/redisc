@@ -24,14 +24,14 @@ func TestConnBind(t *testing.T) {
 	}
 	require.NoError(t, c.Refresh(), "Refresh")
 
-	conn := c.Get().(*Conn)
+	conn := c.Get()
 	defer conn.Close()
 
-	if err := conn.Bind("A", "B"); assert.Error(t, err, "Bind with different keys") {
+	if err := BindConn(conn, "A", "B"); assert.Error(t, err, "Bind with different keys") {
 		assert.Contains(t, err.Error(), "keys do not belong to the same slot", "expected message")
 	}
-	assert.NoError(t, conn.Bind("A"), "Bind")
-	if err := conn.Bind("B"); assert.Error(t, err, "Bind after Bind") {
+	assert.NoError(t, BindConn(conn, "A"), "Bind")
+	if err := BindConn(conn, "B"); assert.Error(t, err, "Bind after Bind") {
 		assert.Contains(t, err.Error(), "connection already bound", "expected message")
 	}
 }
