@@ -24,7 +24,7 @@ func TestRetryConnAsk(t *testing.T) {
 			addr, port, _ := net.SplitHostPort(s.Addr)
 			nPort, _ := strconv.Atoi(port)
 			return resp.Array{
-				resp.Array{int64(0), int64(16383), resp.Array{addr, int64(nPort)}},
+				0: resp.Array{0: int64(0), 1: int64(16383), 2: resp.Array{0: addr, 1: int64(nPort)}},
 			}
 		case "GET":
 			if atomic.LoadInt32(&asking) == 0 {
@@ -75,7 +75,7 @@ func TestRetryConnTryAgain(t *testing.T) {
 			addr, port, _ := net.SplitHostPort(s.Addr)
 			nPort, _ := strconv.Atoi(port)
 			return resp.Array{
-				resp.Array{int64(0), int64(16383), resp.Array{addr, int64(nPort)}},
+				0: resp.Array{0: int64(0), 1: int64(16383), 2: resp.Array{0: addr, 1: int64(nPort)}},
 			}
 		case "GET":
 			if atomic.LoadInt32(&tryagain) < 2 {
