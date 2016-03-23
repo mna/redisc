@@ -194,11 +194,17 @@ func (c *Cluster) getConnForSlot(slot int, forceDial bool) (redis.Conn, error) {
 	return c.getConnForAddr(addr, forceDial)
 }
 
-var rnd = rand.New(rand.NewSource(time.Now().UnixNano()))
+var rnd = struct {
+	sync.Mutex
+	*rand.Rand
+}{Rand: rand.New(rand.NewSource(time.Now().UnixNano()))}
 
 func (c *Cluster) getRandomConn(forceDial bool) (redis.Conn, error) {
 	addrs := c.getNodeAddrs()
+	rnd.Lock()
 	perms := rnd.Perm(len(addrs))
+	rnd.Unlock()
+
 	for _, ix := range perms {
 		addr := addrs[ix]
 		conn, err := c.getConnForAddr(addr, forceDial)

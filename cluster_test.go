@@ -186,6 +186,14 @@ func TestCommands(t *testing.T) {
 			{"PUBSUB", redis.Args{"NUMPAT"}, lenResult(0), ""},
 			{"PUBLISH", redis.Args{"ev1", "a"}, lenResult(0), ""},
 		},
+		"scripting": {
+			{"SCRIPT", redis.Args{"FLUSH"}, "OK", ""},
+			{"SCRIPT", redis.Args{"EXISTS", "return GET x"}, []interface{}{int64(0)}, ""},
+			// to actually use scripts with keys, conn.Bind must be called to select the right node
+		},
+		"server": {
+			{"CLIENT", redis.Args{"LIST"}, lenResult(10), ""},
+		},
 	}
 
 	for i, p := range ports {
@@ -202,57 +210,97 @@ func TestCommands(t *testing.T) {
 	// start a goroutine that subscribes and listens to events
 	ok := make(chan int)
 	done := make(chan int)
-	go func() {
-		conn, err := c.Dial()
-		require.NoError(t, err, "Dial for PubSub")
-		psc := redis.PubSubConn{Conn: conn}
-		assert.NoError(t, psc.PSubscribe("ev*"), "PSubscribe")
-		assert.NoError(t, psc.Subscribe("e1"), "Subscribe")
-		ok <- 1
-
-		var received bool
-	loop:
-		for {
-			select {
-			case <-done:
-				break loop
-			default:
-			}
-
-			v := psc.Receive()
-			switch v := v.(type) {
-			case redis.PMessage:
-				if !assert.Equal(t, []byte("a"), v.Data, "Received value") {
-					t.Logf("%T", v)
-				}
-				received = true
-				break loop
-			}
-		}
-
-		<-done
-
-		assert.NoError(t, psc.Unsubscribe("e1"), "Unsubscribe")
-		assert.NoError(t, psc.PUnsubscribe("ev*"), "PUnsubscribe")
-		assert.NoError(t, psc.Close(), "Close for PubSub")
-		assert.True(t, received, "Did receive event")
-		ok <- 1
-	}()
+	go runPubSubCommands(t, c, ok, done)
 
 	<-ok
 	wg.Add(len(cmdsPerGroup))
 	for _, cmds := range cmdsPerGroup {
-		go func(cmds []redisCmd) {
-			defer wg.Done()
-			runCommands(t, c, cmds)
-		}(cmds)
+		go runCommands(t, c, cmds, &wg)
 	}
+	wg.Add(1)
+	go runScriptCommands(t, c, &wg)
+
 	wg.Wait()
 	close(done)
 	<-ok
 }
 
-func runCommands(t *testing.T, c *Cluster, cmds []redisCmd) {
+func runPubSubCommands(t *testing.T, c *Cluster, steps, stop chan int) {
+	conn, err := c.Dial()
+	require.NoError(t, err, "Dial for PubSub")
+	psc := redis.PubSubConn{Conn: conn}
+	assert.NoError(t, psc.PSubscribe("ev*"), "PSubscribe")
+	assert.NoError(t, psc.Subscribe("e1"), "Subscribe")
+
+	// allow commands to start running
+	steps <- 1
+
+	var received bool
+loop:
+	for {
+		select {
+		case <-stop:
+			break loop
+		default:
+		}
+
+		v := psc.Receive()
+		switch v := v.(type) {
+		case redis.PMessage:
+			if !assert.Equal(t, []byte("a"), v.Data, "Received value") {
+				t.Logf("%T", v)
+			}
+			received = true
+			break loop
+		}
+	}
+
+	<-stop
+
+	assert.NoError(t, psc.Unsubscribe("e1"), "Unsubscribe")
+	assert.NoError(t, psc.PUnsubscribe("ev*"), "PUnsubscribe")
+	assert.NoError(t, psc.Close(), "Close for PubSub")
+	assert.True(t, received, "Did receive event")
+	steps <- 1
+}
+
+func runScriptCommands(t *testing.T, c *Cluster, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	var script = redis.NewScript(2, `
+		redis.call("SET", KEYS[1], ARGV[1])
+		redis.call("SET", KEYS[2], ARGV[2])
+		return 1
+	`)
+
+	conn := c.Get()
+	defer conn.Close()
+	if conn, ok := conn.(*Conn); ok {
+		require.NoError(t, conn.Bind("scr{a}1", "src{a}2"), "Bind")
+	}
+
+	// script.Do, send the whole script
+	v, err := script.Do(conn, "scr{a}1", "scr{a}2", "x", "y")
+	assert.NoError(t, err, "Do script")
+	assert.Equal(t, int64(1), v, "Script result")
+
+	// send only the hash, should work because the script is now loaded on this node
+	assert.NoError(t, script.SendHash(conn, "scr{a}1", "scr{a}2", "x", "y"), "SendHash")
+	assert.NoError(t, conn.Flush(), "Flush")
+	v, err = conn.Receive()
+	assert.NoError(t, err, "SendHash Receive")
+	assert.Equal(t, int64(1), v, "SendHash Script result")
+
+	// do with keys from different slots
+	v, err = script.Do(conn, "scr{a}1", "scr{b}2", "x", "y")
+	if assert.Error(t, err, "Do script invalid keys") {
+		assert.Contains(t, err.Error(), "CROSSSLOT", "Do script invalid keys")
+	}
+}
+
+func runCommands(t *testing.T, c *Cluster, cmds []redisCmd, wg *sync.WaitGroup) {
+	defer wg.Done()
+
 	for _, cmd := range cmds {
 		conn := c.Get()
 		res, err := conn.Do(cmd.name, cmd.args...)
