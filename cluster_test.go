@@ -182,6 +182,10 @@ func TestCommands(t *testing.T) {
 			{"BRPOP", redis.Args{"l1", 1}, lenResult(2), ""},
 			{"BRPOPLPUSH", redis.Args{"l1", "l2", 1}, nil, "CROSSSLOT Keys in request don't hash to the same slot"},
 		},
+		"pubsub": {
+			{"PUBSUB", redis.Args{"NUMPAT"}, lenResult(0), ""},
+			{"PUBLISH", redis.Args{"ev1", "a"}, lenResult(0), ""},
+		},
 	}
 
 	for i, p := range ports {
@@ -195,6 +199,47 @@ func TestCommands(t *testing.T) {
 	require.NoError(t, c.Refresh(), "Refresh")
 
 	var wg sync.WaitGroup
+	// start a goroutine that subscribes and listens to events
+	ok := make(chan int)
+	done := make(chan int)
+	go func() {
+		conn, err := c.Dial()
+		require.NoError(t, err, "Dial for PubSub")
+		psc := redis.PubSubConn{Conn: conn}
+		assert.NoError(t, psc.PSubscribe("ev*"), "PSubscribe")
+		assert.NoError(t, psc.Subscribe("e1"), "Subscribe")
+		ok <- 1
+
+		var received bool
+	loop:
+		for {
+			select {
+			case <-done:
+				break loop
+			default:
+			}
+
+			v := psc.Receive()
+			switch v := v.(type) {
+			case redis.PMessage:
+				if !assert.Equal(t, []byte("a"), v.Data, "Received value") {
+					t.Logf("%T", v)
+				}
+				received = true
+				break loop
+			}
+		}
+
+		<-done
+
+		assert.NoError(t, psc.Unsubscribe("e1"), "Unsubscribe")
+		assert.NoError(t, psc.PUnsubscribe("ev*"), "PUnsubscribe")
+		assert.NoError(t, psc.Close(), "Close for PubSub")
+		assert.True(t, received, "Did receive event")
+		ok <- 1
+	}()
+
+	<-ok
 	wg.Add(len(cmdsPerGroup))
 	for _, cmds := range cmdsPerGroup {
 		go func(cmds []redisCmd) {
@@ -203,6 +248,8 @@ func TestCommands(t *testing.T) {
 		}(cmds)
 	}
 	wg.Wait()
+	close(done)
+	<-ok
 }
 
 func runCommands(t *testing.T, c *Cluster, cmds []redisCmd) {
