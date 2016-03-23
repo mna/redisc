@@ -1,9 +1,13 @@
 package redisc
 
 import (
+	"net"
+	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/PuerkitoBio/gred/resp"
 	"github.com/PuerkitoBio/juggler/internal/redistest"
 	"github.com/garyburd/redigo/redis"
 	"github.com/stretchr/testify/assert"
@@ -11,6 +15,56 @@ import (
 )
 
 func TestRetryConnAsk(t *testing.T) {
+	var s *redistest.MockServer
+	var asking int32
+
+	s = redistest.StartMockServer(t, func(cmd string, args ...string) interface{} {
+		switch cmd {
+		case "CLUSTER":
+			addr, port, _ := net.SplitHostPort(s.Addr)
+			nPort, _ := strconv.Atoi(port)
+			return resp.Array{
+				resp.Array{
+					int64(0), int64(16383), resp.Array{addr, int64(nPort)},
+				},
+			}
+		case "GET":
+			if atomic.LoadInt32(&asking) == 0 {
+				return resp.Error("ASK 1234 " + s.Addr)
+			}
+			return "ok"
+		case "ASKING":
+			atomic.AddInt32(&asking, 1)
+			return nil
+		}
+
+		return resp.Error("unexpected command " + cmd)
+	})
+	defer s.Close()
+
+	c := &Cluster{
+		StartupNodes: []string{s.Addr},
+	}
+	defer c.Close()
+	require.NoError(t, c.Refresh(), "Refresh")
+
+	conn := c.Get()
+	defer conn.Close()
+
+	_, err := conn.Do("GET", "x")
+	if assert.Error(t, err, "GET without retry") {
+		re := ParseRedir(err)
+		if assert.NotNil(t, re, "ParseRedir") {
+			assert.Equal(t, "ASK", re.Type, "ASK")
+		}
+	}
+
+	rc, err := RetryConn(conn, 3, time.Second)
+	require.NoError(t, err, "RetryConn")
+	v, err := rc.Do("GET", "x")
+	if assert.NoError(t, err, "GET with retry") {
+		assert.Equal(t, []byte("ok"), v, "expected result")
+	}
 }
 
 func TestRetryConnTryAgain(t *testing.T) {

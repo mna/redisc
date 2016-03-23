@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/PuerkitoBio/gred/resp"
 	"github.com/PuerkitoBio/juggler/internal/redistest"
 	"github.com/garyburd/redigo/redis"
 	"github.com/stretchr/testify/assert"
@@ -52,6 +53,21 @@ func TestClusterRefresh(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestClusterRefreshAllFail(t *testing.T) {
+	s := redistest.StartMockServer(t, func(cmd string, args ...string) interface{} {
+		return resp.Error("nope")
+	})
+	defer s.Close()
+
+	c := &Cluster{
+		StartupNodes: []string{s.Addr},
+	}
+	if err := c.Refresh(); assert.Error(t, err, "Refresh") {
+		assert.Contains(t, err.Error(), "all nodes failed", "expected message")
+	}
+	require.NoError(t, c.Close(), "Close")
 }
 
 func TestClusterNoNode(t *testing.T) {
