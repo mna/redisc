@@ -18,8 +18,8 @@
 //
 // Similarly, the Conn type implements redigo's redis.Conn
 // interface, so the API to execute commands is the same -
-// in fact the redisc package uses the redigo package as a
-// dependency.
+// in fact the redisc package uses the redigo package as its
+// only third-party dependency.
 //
 // When more control is needed, the package offers some
 // extra behaviour specific to working with a redis cluster:

@@ -1,6 +1,7 @@
 package redisc_test
 
 import (
+	"fmt"
 	"log"
 	"time"
 
@@ -66,4 +67,59 @@ func createPool(addr string, opts ...redis.DialOption) (*redis.Pool, error) {
 			return err
 		},
 	}, nil
+}
+
+// Shows how to call scripts with redisc.
+func ExampleConn() {
+	// create the cluster
+	cluster := redisc.Cluster{
+		StartupNodes: []string{":7000", ":7001", ":7002"},
+		DialOptions:  []redis.DialOption{redis.DialConnectTimeout(5 * time.Second)},
+		CreatePool:   createPool,
+	}
+	defer cluster.Close()
+
+	// initialize its mapping
+	if err := cluster.Refresh(); err != nil {
+		log.Fatalf("Refresh failed: %v", err)
+	}
+
+	// create a script that takes 2 keys and 2 values, and returns 1
+	var script = redis.NewScript(2, `
+		redis.call("SET", KEYS[1], ARGV[1])
+		redis.call("SET", KEYS[2], ARGV[2])
+		return 1
+	`)
+
+	// get a connection from the cluster
+	conn := cluster.Get()
+	defer conn.Close()
+
+	// bind it to the right node for the required keys, ahead of time
+	if err := redisc.BindConn(conn, "scr{a}1", "src{a}2"); err != nil {
+		log.Fatalf("BindConn failed: %v", err)
+	}
+
+	// script.Do, sends the whole script on first use
+	v, err := script.Do(conn, "scr{a}1", "scr{a}2", "x", "y")
+	if err != nil {
+		log.Fatalf("script.Do failed: %v", err)
+	}
+	fmt.Println("Do returned ", v)
+
+	// it is also possible to send only the hash, once it has been
+	// loaded on that node
+	if err := script.SendHash(conn, "scr{a}1", "scr{a}2", "x", "y"); err != nil {
+		log.Fatalf("script.SendHash failed: %v", err)
+	}
+	if err := conn.Flush(); err != nil {
+		log.Fatalf("Flush failed: %v", err)
+	}
+
+	// and receive the script's result
+	v, err = conn.Receive()
+	if err != nil {
+		log.Fatalf("Receive failed: %v", err)
+	}
+	fmt.Println("Receive returned ", v)
 }
