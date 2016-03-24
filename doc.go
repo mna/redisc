@@ -91,7 +91,7 @@
 // wishes to handle with the connection. All keys must belong to the
 // same slot, and the connection must not already be bound to a node,
 // otherwise an error is returned. On success, the connection is
-// bound the the node holding the slot of the specified key(s).
+// bound to the node holding the slot of the specified key(s).
 //
 // Because the connection is returned as a redis.Conn interface, a
 // type assertion must be used to access the underlying *Conn and
@@ -133,11 +133,15 @@
 // The concurrency model is similar to that of the redigo package:
 //
 //     - Cluster methods are safe to call concurrently (like redis.Pool).
+//
 //     - Connections do not support concurrent calls to write methods
 //       (Send, Flush) or concurrent calls to the read method (Receive).
+//
 //     - Connections do allow a concurrent reader and writer.
+//
 //     - Because the Do method combines the functionality of Send, Flush
 //       and Receive, it cannot be called concurrently with other methods.
+//
 //     - The Bind method is safe to call concurrently, but there is not
 //       much point in doing so as it will fail if the connection is
 //       already bound, so only one call will succeed.
