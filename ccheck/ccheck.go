@@ -1,3 +1,7 @@
+// Command ccheck implements the consistency checker redis cluster client
+// as described in http://redis.io/topics/cluster-tutorial. It is used
+// to test the redisc package with real cluster failover and resharding
+// situations.
 package main
 
 import (
@@ -62,6 +66,15 @@ func main() {
 	runChecks(cluster, errCh, *delayFlag)
 }
 
+func getRetryConn(cluster *redisc.Cluster) redis.Conn {
+	c := cluster.Get()
+	c, _ = redisc.RetryConn(c, 4, 100*time.Millisecond)
+	if err := c.Err(); err != nil {
+		log.Fatalf("failed to get a connection: %v", err)
+	}
+	return c
+}
+
 func runChecks(cluster *redisc.Cluster, errCh chan<- error, delay time.Duration) {
 	var c redis.Conn
 
@@ -70,27 +83,24 @@ func runChecks(cluster *redisc.Cluster, errCh chan<- error, delay time.Duration)
 		var r, w, fr, fw, lw, naw int
 
 		if c == nil {
-			c = cluster.Get()
-			c, _ = redisc.RetryConn(c, 4, 100*time.Millisecond)
-			if c.Err() != nil {
-				log.Fatal(c.Err())
-			}
+			c = getRetryConn(cluster)
 		}
 
 		key := genKey()
 
-		// read
+		// read only if we know what that key should be
 		exp, ok := cache[key]
 		if ok {
 			v, err := redis.Int(c.Do("GET", key))
 			if err != nil {
-				if _, ok := err.(*net.OpError); ok {
+				if isNetOpError(err) {
 					c.Close()
 					c = nil
 					continue
 				}
+
 				select {
-				case errCh <- err:
+				case errCh <- fmt.Errorf("read from slot %d failed: %v", redisc.Slot(key), err):
 				default:
 				}
 				fr = 1
@@ -107,13 +117,14 @@ func runChecks(cluster *redisc.Cluster, errCh chan<- error, delay time.Duration)
 		// write
 		v, err := redis.Int(c.Do("INCR", key))
 		if err != nil {
-			if _, ok := err.(*net.OpError); ok {
+			if isNetOpError(err) {
 				c.Close()
 				c = nil
 				continue
 			}
+
 			select {
-			case errCh <- err:
+			case errCh <- fmt.Errorf("write to slot %d failed: %v", redisc.Slot(key), err):
 			default:
 			}
 			fw = 1
@@ -122,17 +133,25 @@ func runChecks(cluster *redisc.Cluster, errCh chan<- error, delay time.Duration)
 			cache[key] = v
 		}
 
-		mu.Lock()
-		writes += w
-		reads += r
-		failedWrites += fw
-		failedReads += fr
-		lostWrites += lw
-		noAckWrites += naw
-		mu.Unlock()
-
+		updateStats(w, r, fw, fr, lw, naw)
 		time.Sleep(delay)
 	}
+}
+
+func isNetOpError(err error) bool {
+	_, ok := err.(*net.OpError)
+	return ok
+}
+
+func updateStats(deltas ...int) {
+	mu.Lock()
+	writes += deltas[0]
+	reads += deltas[1]
+	failedWrites += deltas[2]
+	failedReads += deltas[3]
+	lostWrites += deltas[4]
+	noAckWrites += deltas[5]
+	mu.Unlock()
 }
 
 func printErr(errCh <-chan error) {
@@ -146,12 +165,9 @@ func printErr(errCh <-chan error) {
 func printStats() {
 	for range time.Tick(time.Second) {
 		mu.Lock()
-		w := writes
-		r := reads
-		fw := failedWrites
-		fr := failedReads
-		lw := lostWrites
-		naw := noAckWrites
+		w, r := writes, reads
+		fw, fr := failedWrites, failedReads
+		lw, naw := lostWrites, noAckWrites
 		mu.Unlock()
 		fmt.Printf("%d R (%d err) | %d W (%d err) | %d lost | %d noack\n", r, fr, w, fw, lw, naw)
 	}
