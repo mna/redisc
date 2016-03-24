@@ -2,6 +2,12 @@ package main
 
 import (
 	"flag"
+	"fmt"
+	"log"
+	"math/rand"
+	"net"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/PuerkitoBio/redisc"
@@ -9,17 +15,34 @@ import (
 )
 
 var (
-	addrFlag         = flag.String("addr", "localhost:7000", "Redis server `address`.")
+	addrFlag = flag.String("addr", "localhost:7000", "Redis server `address`.")
+
 	connTimeoutFlag  = flag.Duration("c", time.Second, "Connection `timeout`.")
+	delayFlag        = flag.Duration("d", 0, "Delay `duration` between INCR calls.")
+	idleTimeoutFlag  = flag.Duration("i", 30*time.Second, "Pooled connection idle `timeout`.")
 	readTimeoutFlag  = flag.Duration("r", 100*time.Millisecond, "Read `timeout`.")
 	writeTimeoutFlag = flag.Duration("w", 100*time.Millisecond, "Write `timeout`.")
-	maxIdleFlag      = flag.Int("max-idle", 10, "Maximum idle `connections` per pool.")
-	maxActiveFlag    = flag.Int("max-active", 100, "Maximum active `connections` per pool.")
-	idleTimeoutFlag  = flag.Duration("i", 30*time.Second, "Pooled connection idle `timeout`.")
+
+	maxIdleFlag   = flag.Int("max-idle", 10, "Maximum idle `connections` per pool.")
+	maxActiveFlag = flag.Int("max-active", 100, "Maximum active `connections` per pool.")
+)
+
+const (
+	workingSet = 1000
+	keySpace   = 10000
+)
+
+var (
+	mu sync.Mutex
+
+	writes, reads             int
+	failedWrites, failedReads int
+	lostWrites, noAckWrites   int
 )
 
 func main() {
 	flag.Parse()
+	rand.Seed(time.Now().UnixNano())
 
 	cluster := &redisc.Cluster{
 		StartupNodes: []string{*addrFlag},
@@ -31,6 +54,115 @@ func main() {
 		CreatePool: createPool,
 	}
 	defer cluster.Close()
+
+	errCh := make(chan error, 1)
+	go printStats()
+	go printErr(errCh)
+
+	runChecks(cluster, errCh, *delayFlag)
+}
+
+func runChecks(cluster *redisc.Cluster, errCh chan<- error, delay time.Duration) {
+	var c redis.Conn
+
+	cache := make(map[string]int, workingSet)
+	for {
+		var r, w, fr, fw, lw, naw int
+
+		if c == nil {
+			c = cluster.Get()
+			c, _ = redisc.RetryConn(c, 4, 100*time.Millisecond)
+			if c.Err() != nil {
+				log.Fatal(c.Err())
+			}
+		}
+
+		key := genKey()
+
+		// read
+		exp, ok := cache[key]
+		if ok {
+			v, err := redis.Int(c.Do("GET", key))
+			if err != nil {
+				if _, ok := err.(*net.OpError); ok {
+					c.Close()
+					c = nil
+					continue
+				}
+				select {
+				case errCh <- err:
+				default:
+				}
+				fr = 1
+			} else {
+				r = 1
+				if exp > v {
+					lw = exp - v
+				} else if exp < v {
+					naw = v - exp
+				}
+			}
+		}
+
+		// write
+		v, err := redis.Int(c.Do("INCR", key))
+		if err != nil {
+			if _, ok := err.(*net.OpError); ok {
+				c.Close()
+				c = nil
+				continue
+			}
+			select {
+			case errCh <- err:
+			default:
+			}
+			fw = 1
+		} else {
+			w = 1
+			cache[key] = v
+		}
+
+		mu.Lock()
+		writes += w
+		reads += r
+		failedWrites += fw
+		failedReads += fr
+		lostWrites += lw
+		noAckWrites += naw
+		mu.Unlock()
+
+		time.Sleep(delay)
+	}
+}
+
+func printErr(errCh <-chan error) {
+	for err := range errCh {
+		fmt.Println(err)
+		time.Sleep(time.Second)
+	}
+}
+
+// each second, print stats
+func printStats() {
+	for range time.Tick(time.Second) {
+		mu.Lock()
+		w := writes
+		r := reads
+		fw := failedWrites
+		fr := failedReads
+		lw := lostWrites
+		naw := noAckWrites
+		mu.Unlock()
+		fmt.Printf("%d R (%d err) | %d W (%d err) | %d lost | %d noack\n", r, fr, w, fw, lw, naw)
+	}
+}
+
+func genKey() string {
+	ks := workingSet
+	if rand.Float64() > 0.5 {
+		ks = keySpace
+	}
+	return "key_" + strconv.Itoa(rand.Intn(ks))
 }
 
 func createPool(addr string, opts ...redis.DialOption) (*redis.Pool, error) {
