@@ -9,7 +9,7 @@ import (
 	"github.com/garyburd/redigo/redis"
 )
 
-// Example of how to create and use a Cluster.
+// Create and use a cluster.
 func Example() {
 	// create the cluster
 	cluster := redisc.Cluster{
@@ -69,7 +69,7 @@ func createPool(addr string, opts ...redis.DialOption) (*redis.Pool, error) {
 	}, nil
 }
 
-// Shows how to call scripts with redisc.
+// Execute scripts.
 func ExampleConn() {
 	// create the cluster
 	cluster := redisc.Cluster{
@@ -122,4 +122,40 @@ func ExampleConn() {
 		log.Fatalf("Receive failed: %v", err)
 	}
 	fmt.Println("Receive returned ", v)
+}
+
+// Automatically retry in case of redirection errors.
+func ExampleRetryConn() {
+	// create the cluster
+	cluster := redisc.Cluster{
+		StartupNodes: []string{":7000", ":7001", ":7002"},
+		DialOptions:  []redis.DialOption{redis.DialConnectTimeout(5 * time.Second)},
+		CreatePool:   createPool,
+	}
+	defer cluster.Close()
+
+	// initialize its mapping
+	if err := cluster.Refresh(); err != nil {
+		log.Fatalf("Refresh failed: %v", err)
+	}
+
+	// get a connection from the cluster
+	conn := cluster.Get()
+	defer conn.Close()
+
+	// create the retry connection - only Do, Close and Err are
+	// supported on that connection. It will make up to 3 attempts
+	// to get a valid response, and will wait 100ms before a retry
+	// in case of a TRYAGAIN redis error.
+	retryConn, err := redisc.RetryConn(conn, 3, 100*time.Millisecond)
+	if err != nil {
+		log.Fatalf("RetryConn failed: %v", err)
+	}
+
+	// call commands
+	v, err := retryConn.Do("GET", "key")
+	if err != nil {
+		log.Fatalf("GET failed: %v", err)
+	}
+	fmt.Println("GET returned ", v)
 }
