@@ -128,4 +128,18 @@
 // its mapping of slots to nodes automatically by keeping track of
 // MOVED replies.
 //
+// Concurrency
+//
+// The concurrency model is similar to that of the redigo package:
+//
+//     - Cluster methods are safe to call concurrently (like redis.Pool).
+//     - Connections do not support concurrent calls to write methods
+//       (Send, Flush) or concurrent calls to the read method (Receive).
+//     - Connections do allow a concurrent reader and writer.
+//     - Because the Do method combines the functionality of Send, Flush
+//       and Receive, it cannot be called concurrently with other methods.
+//     - The Bind method is safe to call concurrently, but there is not
+//       much point in doing so as it will fail if the connection is
+//       already bound, so only one call will succeed.
+//
 package redisc
