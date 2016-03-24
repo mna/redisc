@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PuerkitoBio/juggler/internal/redistest"
-	"github.com/PuerkitoBio/juggler/internal/redistest/resp"
+	"github.com/PuerkitoBio/redisc/redistest"
+	"github.com/PuerkitoBio/redisc/redistest/resp"
 	"github.com/garyburd/redigo/redis"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

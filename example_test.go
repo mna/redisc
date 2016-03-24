@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/PuerkitoBio/juggler/redisc"
+	"github.com/PuerkitoBio/redisc"
 	"github.com/garyburd/redigo/redis"
 )
 
