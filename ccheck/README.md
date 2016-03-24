@@ -10,7 +10,7 @@ To run the cluster:
 
 1. create-cluster start
 2. create-cluster create (type yes when prompted)
-3. executed the ccheck go client program
+3. execute the ccheck go client program
 4. play with the cluster, trigger failovers, etc.
 5. create-cluster stop
 6. create-cluster clean
