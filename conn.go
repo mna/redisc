@@ -141,7 +141,7 @@ func (c *Conn) bind(slot int) (rc redis.Conn, ok bool, err error) {
 func cmdSlot(cmd string, args []interface{}) int {
 	slot := -1
 	if len(args) > 0 {
-		key := fmt.Sprintf("%v", args[0])
+		key := fmt.Sprintf("%s", args[0])
 		slot = Slot(key)
 	}
 	return slot
