@@ -185,7 +185,7 @@ func startServerWithConfig(t *testing.T, port string, w io.Writer, conf string) 
 	require.NoError(t, c.Start(), "start redis-server")
 
 	// wait for the server to start accepting connections
-	require.True(t, waitForPort(port, 5*time.Second), "wait for redis-server")
+	require.True(t, waitForPort(port, 10*time.Second), "wait for redis-server")
 
 	t.Logf("redis-server started on port %s", port)
 	return c
