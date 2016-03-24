@@ -3,6 +3,43 @@
 // be executed on a redis cluster, including pub-sub and scripts.
 // See http://redis.io/topics/cluster-spec for details.
 //
+// Design
+//
+// The package defines two main types: Cluster and Conn. Both
+// are described in more details below, but the Cluster manages
+// the mapping of keys (or more exactly, hash slots computed from
+// keys) to a group of nodes that form a redis cluster, and a
+// Conn manages a connection to this cluster.
+//
+// The package is designed such that for simple uses, or when
+// keys have been carefully named to play well with a redis
+// cluster, a Cluster value can be used as a drop-in replacement
+// for a redis.Pool from the redigo package.
+//
+// Similarly, the Conn type implements redigo's redis.Conn
+// interface, so the API to execute commands is the same -
+// in fact the redisc package uses the redigo package as a
+// dependency.
+//
+// When more control is needed, the package offers some
+// extra behaviour specific to working with a redis cluster:
+//
+//     - Slot and SplitBySlot functions to compute the slot for
+//     a given key and to split a list of keys into groups of
+//     keys from the same slot, so that each group can safely be
+//     handled using the same connection.
+//
+//     - *Conn.Bind (or the BindConn package-level helper function)
+//     to explicitly specify the keys that will be used with the
+//     connection so that the right node is selected, instead of
+//     relying on the automatic detection based on the first
+//     parameter of the command.
+//
+//     - RetryConn to wrap a connection into one that automatically
+//     follows redirections when the cluster moves slots around.
+//
+//     - Helper functions to deal with cluster-specific errors.
+//
 // Cluster
 //
 // The Cluster type manages a redis cluster and offers an
