@@ -164,6 +164,7 @@ func BindConn(c redis.Conn, keys ...string) error {
 // the slot of the provided keys. If the keys don't belong to the
 // same slot, an error is returned and the connection is not bound.
 // If the connection is already bound, an error is returned.
+// If no key is provided, it binds to a random node.
 func (c *Conn) Bind(keys ...string) error {
 	slot := -1
 	for _, k := range keys {
