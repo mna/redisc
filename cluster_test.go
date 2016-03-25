@@ -77,6 +77,12 @@ func TestClusterNoNode(t *testing.T) {
 	if assert.Error(t, err, "Do") {
 		assert.Contains(t, err.Error(), "failed to get a connection", "expected message")
 	}
+	if err := BindConn(conn); assert.Error(t, err, "Bind without key") {
+		assert.Contains(t, err.Error(), "failed to get a connection", "expected message")
+	}
+	if err := BindConn(conn, "A"); assert.Error(t, err, "Bind with key") {
+		assert.Contains(t, err.Error(), "failed to get a connection", "expected message")
+	}
 }
 
 func TestClusterNeedsRefresh(t *testing.T) {
