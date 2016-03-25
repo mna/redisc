@@ -34,6 +34,11 @@ func TestConnBind(t *testing.T) {
 	if err := BindConn(conn, "B"); assert.Error(t, err, "Bind after Bind") {
 		assert.Contains(t, err.Error(), "connection already bound", "expected message")
 	}
+
+	conn2 := c.Get()
+	defer conn2.Close()
+
+	assert.NoError(t, BindConn(conn2), "Bind without key")
 }
 
 func TestConnClose(t *testing.T) {
