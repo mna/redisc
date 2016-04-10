@@ -2,6 +2,7 @@
 package redistest
 
 import (
+	"bufio"
 	"bytes"
 	"fmt"
 	"io"
@@ -65,6 +66,7 @@ func StartClusterWithSlaves(t *testing.T, w io.Writer) (func(), []string) {
 
 	// wait for the slaves to catch up
 	require.True(t, waitForCluster(t, 10*time.Second, slavePorts...), "wait for cluster slaves")
+	time.Sleep(5 * time.Second) // TODO : better waitForCuster
 
 	return func() {
 		for _, c := range slaveCmds {
@@ -135,14 +137,25 @@ func StartCluster(t *testing.T, w io.Writer) (func(), []string) {
 	}, ports
 }
 
-func printClusterInfo(t *testing.T, port string) {
+func printClusterNodes(t *testing.T, port string) {
 	conn, err := redis.Dial("tcp", ":"+port)
 	require.NoError(t, err, "Dial to cluster node")
 	defer conn.Close()
 
-	res, err := conn.Do("CLUSTER", "INFO")
-	require.NoError(t, err, "CLUSTER INFO")
+	res, err := conn.Do("CLUSTER", "NODES")
+	require.NoError(t, err, "CLUSTER NODES")
 	fmt.Println(string(res.([]byte)))
+}
+
+func printClusterSlots(t *testing.T, port string) {
+	conn, err := redis.Dial("tcp", ":"+port)
+	require.NoError(t, err, "Dial to cluster node")
+	defer conn.Close()
+
+	cmd := exec.Command("redis-cli", "-p", port, "CLUSTER", "SLOTS")
+	b, err := cmd.CombinedOutput()
+	require.NoError(t, err, "CLUSTER SLOTS via redis-cli")
+	fmt.Println(string(b))
 }
 
 func setupSlave(t *testing.T, masterPort, slavePort string) {
@@ -150,8 +163,29 @@ func setupSlave(t *testing.T, masterPort, slavePort string) {
 	require.NoError(t, err, "Dial to slave node")
 	defer conn.Close()
 
-	_, err = conn.Do("SLAVEOF", "127.0.0.1", masterPort)
-	require.NoError(t, err, "SLAVEOF")
+	// join the cluster
+	_, err = conn.Do("CLUSTER", "MEET", "127.0.0.1", masterPort)
+	require.NoError(t, err, "CLUSTER MEET")
+
+	waitForCluster(t, 10*time.Second, slavePort)
+
+	// grab the master's ID
+	nodes, err := redis.String(conn.Do("CLUSTER", "NODES"))
+	require.NoError(t, err, "CLUSTER NODES")
+
+	var masterID string
+	s := bufio.NewScanner(strings.NewReader(nodes))
+	for s.Scan() {
+		fields := strings.Fields(s.Text())
+		if fields[1] == "127.0.0.1:"+masterPort {
+			masterID = fields[0]
+			break
+		}
+	}
+	require.NotEmpty(t, masterID, "Find master ID")
+
+	_, err = conn.Do("CLUSTER", "REPLICATE", masterID)
+	require.NoError(t, err, "CLUSTER REPLICATE")
 }
 
 func setupClusterNode(t *testing.T, port, meetPort string, start, count int) {

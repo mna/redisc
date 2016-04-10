@@ -150,19 +150,23 @@ func (c *Cluster) getClusterSlots(addr string) ([]slotMapping, error) {
 		}
 
 		var start, end int
-		var nodes []interface{}
-		if _, err = redis.Scan(slotRange, &start, &end, &nodes); err != nil {
+		slotRange, err = redis.Scan(slotRange, &start, &end)
+		if err != nil {
 			return nil, err
 		}
 
 		sm := slotMapping{start: start, end: end}
 		// store the master address and all slaves
-		for len(nodes) > 0 {
+		for len(slotRange) > 0 {
+			var nodes []interface{}
+			slotRange, err = redis.Scan(slotRange, &nodes)
+			if err != nil {
+				return nil, err
+			}
+
 			var addr string
 			var port int
-
-			nodes, err = redis.Scan(nodes, &addr, &port)
-			if err != nil {
+			if _, err = redis.Scan(nodes, &addr, &port); err != nil {
 				return nil, err
 			}
 			sm.nodes = append(sm.nodes, addr+":"+strconv.Itoa(port))

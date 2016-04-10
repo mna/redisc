@@ -30,11 +30,8 @@ func TestClusterRefresh(t *testing.T) {
 	fn, ports := redistest.StartCluster(t, nil)
 	defer fn()
 
-	for i, p := range ports {
-		ports[i] = ":" + p
-	}
 	c := &Cluster{
-		StartupNodes: ports,
+		StartupNodes: []string{":" + ports[0]},
 	}
 
 	err := c.Refresh()
@@ -50,8 +47,39 @@ func TestClusterRefresh(t *testing.T) {
 				}
 				if assert.NotEmpty(t, master[0]) {
 					split := strings.Index(master[0], ":")
-					assert.Contains(t, ports, master[0][split:], "expected master")
+					assert.Contains(t, ports, master[0][split+1:], "expected master")
 				}
+			}
+		}
+	}
+}
+
+func TestClusterWithSlavesRefresh(t *testing.T) {
+	fn, ports := redistest.StartClusterWithSlaves(t, nil)
+	defer fn()
+
+	c := &Cluster{
+		StartupNodes: []string{":" + ports[0]},
+	}
+
+	err := c.Refresh()
+	if assert.NoError(t, err, "Refresh") {
+		var prev string
+		pix := -1
+		for ix, node := range c.mapping {
+			if assert.Equal(t, 2, len(node), "Mapping for slot %d must have 2 nodes", ix) {
+				if node[0] != prev || ix == len(c.mapping)-1 {
+					prev = node[0]
+					t.Logf("%5d: %s\n", ix, node[0])
+					pix++
+				}
+				if assert.NotEmpty(t, node[0]) {
+					split0, split1 := strings.Index(node[0], ":"), strings.Index(node[1], ":")
+					assert.Contains(t, ports, node[0][split0+1:], "expected address")
+					assert.Contains(t, ports, node[1][split1+1:], "expected address")
+				}
+			} else {
+				break
 			}
 		}
 	}
