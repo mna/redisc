@@ -16,7 +16,7 @@ The main features are:
 
 * Drop-in replacement for `redis.Pool` (the `Cluster` type implements the same `Get` and `Close` method signatures).
 * Connections are `redis.Conn` interfaces and use the `redigo` package to execute commands, `redisc` only handles the cluster part.
-* Support for all cluster-supported commands, including scripting, transactions and pub-sub.
+* Support for all cluster-supported commands (except `READONLY`/`READWRITE`, though this is planned), including scripting, transactions and pub-sub.
 * Client-side smart routing, automatically keeps track of which node holds which key slots.
 * Automatic retry of MOVED, ASK and TRYAGAIN errors when desired, via `RetryConn`.
 * Manual handling of redirections and retries when desired, via `IsTryAgain` and `ParseRedir`.
