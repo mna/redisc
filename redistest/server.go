@@ -46,6 +46,40 @@ func StartServer(t *testing.T, w io.Writer, conf string) (*exec.Cmd, string) {
 	return startServerWithConfig(t, port, w, conf), port
 }
 
+// StartClusterWithSlaves starts a redis cluster of 3 nodes with
+// 1 slave each. It returns the cleanup function to call after use
+// (typically in a defer) and the list of ports for each node,
+// masters first, then slaves.
+func StartClusterWithSlaves(t *testing.T, w io.Writer) (func(), []string) {
+	fn, ports := StartCluster(t, w)
+
+	var slavePorts []string
+	var slaveCmds []*exec.Cmd
+	for _, master := range ports {
+		port := getClusterFreePort(t)
+		cmd := startServerWithConfig(t, port, w, fmt.Sprintf(ClusterConfig, port))
+		setupSlave(t, master, port)
+		slavePorts = append(slavePorts, port)
+		slaveCmds = append(slaveCmds, cmd)
+	}
+
+	// wait for the slaves to catch up
+	require.True(t, waitForCluster(t, 10*time.Second, slavePorts...), "wait for cluster slaves")
+
+	return func() {
+		for _, c := range slaveCmds {
+			c.Process.Kill()
+		}
+		for _, port := range slavePorts {
+			if strings.HasPrefix(port, ":") {
+				port = port[1:]
+			}
+			os.Remove(filepath.Join(os.TempDir(), fmt.Sprintf("nodes.%s.conf", port)))
+		}
+		fn()
+	}, append(ports, slavePorts...)
+}
+
 // StartCluster starts a redis cluster of 3 nodes using the
 // ClusterConfig variable as configuration. If w is not nil,
 // stdout and stderr of each node will be written to it.
@@ -61,7 +95,6 @@ func StartCluster(t *testing.T, w io.Writer) (func(), []string) {
 	const (
 		numNodes  = 3
 		hashSlots = 16384
-		maxPort   = 55535
 	)
 
 	cmds := make([]*exec.Cmd, numNodes)
@@ -69,14 +102,7 @@ func StartCluster(t *testing.T, w io.Writer) (func(), []string) {
 	slotsPerNode := hashSlots / numNodes
 
 	for i := 0; i < numNodes; i++ {
-		// the port number in a redis-cluster must be below 55535 because
-		// the nodes communicate with others on port p+10000. Try to get
-		// lucky and subtract 10000 from the random port received if it
-		// is too high.
-		port := getFreePort(t)
-		if n, _ := strconv.Atoi(port); n >= maxPort {
-			port = strconv.Itoa(n - 10000)
-		}
+		port := getClusterFreePort(t)
 		cmd := startServerWithConfig(t, port, w, fmt.Sprintf(ClusterConfig, port))
 		cmds[i], ports[i] = cmd, port
 
@@ -117,6 +143,15 @@ func printClusterInfo(t *testing.T, port string) {
 	res, err := conn.Do("CLUSTER", "INFO")
 	require.NoError(t, err, "CLUSTER INFO")
 	fmt.Println(string(res.([]byte)))
+}
+
+func setupSlave(t *testing.T, masterPort, slavePort string) {
+	conn, err := redis.Dial("tcp", ":"+slavePort)
+	require.NoError(t, err, "Dial to slave node")
+	defer conn.Close()
+
+	_, err = conn.Do("SLAVEOF", "127.0.0.1", masterPort)
+	require.NoError(t, err, "SLAVEOF")
 }
 
 func setupClusterNode(t *testing.T, port, meetPort string, start, count int) {
@@ -203,6 +238,20 @@ func waitForPort(port string, timeout time.Duration) bool {
 		time.Sleep(10 * time.Millisecond)
 	}
 	return false
+}
+
+func getClusterFreePort(t *testing.T) string {
+	const maxPort = 55535
+
+	// the port number in a redis-cluster must be below 55535 because
+	// the nodes communicate with others on port p+10000. Try to get
+	// lucky and subtract 10000 from the random port received if it
+	// is too high.
+	port := getFreePort(t)
+	if n, _ := strconv.Atoi(port); n >= maxPort {
+		port = strconv.Itoa(n - 10000)
+	}
+	return port
 }
 
 func getFreePort(t *testing.T) string {

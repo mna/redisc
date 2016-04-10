@@ -42,14 +42,16 @@ func TestClusterRefresh(t *testing.T) {
 		var prev string
 		pix := -1
 		for ix, master := range c.mapping {
-			if master != prev || ix == len(c.mapping)-1 {
-				prev = master
-				t.Logf("%5d: %s\n", ix, master)
-				pix++
-			}
-			if assert.NotEmpty(t, master) {
-				split := strings.Index(master, ":")
-				assert.Contains(t, ports, master[split:], "expected master")
+			if assert.Equal(t, 1, len(master), "Mapping has 1 master node") {
+				if master[0] != prev || ix == len(c.mapping)-1 {
+					prev = master[0]
+					t.Logf("%5d: %s\n", ix, master[0])
+					pix++
+				}
+				if assert.NotEmpty(t, master[0]) {
+					split := strings.Index(master[0], ":")
+					assert.Contains(t, ports, master[0][split:], "expected master")
+				}
 			}
 		}
 	}

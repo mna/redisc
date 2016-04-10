@@ -183,7 +183,7 @@ func TestRetryConnMoved(t *testing.T) {
 	c.mu.Lock()
 	addrA := c.mapping[15495]
 	addrB := c.mapping[3300]
-	c.mapping[3300] = "x"
+	c.mapping[3300] = []string{"x"}
 	c.mu.Unlock()
 
 	// set key "b", which is on a different node (generates a MOVED) - this is NOT a RetryConn
@@ -199,7 +199,7 @@ func TestRetryConnMoved(t *testing.T) {
 	c.mu.Lock()
 	assert.Equal(t, addrA, c.mapping[15495], "Addr A")
 	assert.Equal(t, addrB, c.mapping[3300], "Sentinel value B")
-	c.mapping[3300] = "x"
+	c.mapping[3300] = []string{"x"}
 	c.mu.Unlock()
 
 	// now wrap it in a RetryConn

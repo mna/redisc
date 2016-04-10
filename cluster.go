@@ -36,7 +36,7 @@ type Cluster struct {
 	err        error                  // broken connection error
 	pools      map[string]*redis.Pool // created pools per node
 	nodes      map[string]bool        // set of known active nodes, kept up-to-date
-	mapping    [hashSlots]string      // hash slot number to master server address
+	mapping    [hashSlots][]string    // hash slot number to master and slave(s) server address, master is always at [0]
 	refreshing bool                   // indicates if there's a refresh in progress
 }
 
@@ -73,15 +73,23 @@ func (c *Cluster) refresh() error {
 				c.nodes[k] = false
 			}
 			for _, sm := range m {
+				if len(sm.nodes) > 0 && sm.nodes[0] != "" {
+					c.nodes[sm.nodes[0]] = true
+				}
 				for ix := sm.start; ix <= sm.end; ix++ {
-					c.mapping[ix] = sm.master
-					c.nodes[sm.master] = true
+					c.mapping[ix] = sm.nodes
 				}
 			}
 			// remove all nodes that are gone from the cluster
 			for k, ok := range c.nodes {
 				if !ok {
 					delete(c.nodes, k)
+
+					// close and remove all existing pools for removed nodes
+					if p := c.pools[k]; p != nil {
+						p.Close()
+						delete(c.pools, k)
+					}
 				}
 			}
 			// mark that no refresh is needed until another MOVED
@@ -104,7 +112,7 @@ func (c *Cluster) refresh() error {
 func (c *Cluster) needsRefresh(re *RedirError) {
 	c.mu.Lock()
 	if re != nil {
-		c.mapping[re.NewSlot] = re.Addr
+		c.mapping[re.NewSlot] = []string{re.Addr}
 	}
 	if !c.refreshing {
 		// refreshing is reset to only once the goroutine has
@@ -118,8 +126,7 @@ func (c *Cluster) needsRefresh(re *RedirError) {
 
 type slotMapping struct {
 	start, end int
-	master     string
-	slaves     []string
+	nodes      []string // master is always at [0]
 }
 
 func (c *Cluster) getClusterSlots(addr string) ([]slotMapping, error) {
@@ -153,16 +160,12 @@ func (c *Cluster) getClusterSlots(addr string) ([]slotMapping, error) {
 		for len(nodes) > 0 {
 			var addr string
 			var port int
+
 			nodes, err = redis.Scan(nodes, &addr, &port)
 			if err != nil {
 				return nil, err
 			}
-
-			if sm.master == "" {
-				sm.master = addr + ":" + strconv.Itoa(port)
-			} else {
-				sm.slaves = append(sm.slaves, addr+":"+strconv.Itoa(port))
-			}
+			sm.nodes = append(sm.nodes, addr+":"+strconv.Itoa(port))
 		}
 
 		m = append(m, sm)
@@ -188,11 +191,14 @@ func (c *Cluster) getConnForAddr(addr string, forceDial bool) (redis.Conn, error
 		}
 
 		c.mu.Lock()
-		if c.pools == nil {
-			c.pools = make(map[string]*redis.Pool, len(c.StartupNodes))
+		// check again, concurrent request may have set the pool in the meantime
+		if p = c.pools[addr]; p == nil {
+			if c.pools == nil {
+				c.pools = make(map[string]*redis.Pool, len(c.StartupNodes))
+			}
+			c.pools[addr] = pool
+			p = pool
 		}
-		c.pools[addr] = pool
-		p = pool
 	}
 
 	c.mu.Unlock()
@@ -205,12 +211,12 @@ var errNoNodeForSlot = errors.New("redisc: no node for slot")
 
 func (c *Cluster) getConnForSlot(slot int, forceDial bool) (redis.Conn, error) {
 	c.mu.Lock()
-	addr := c.mapping[slot]
+	addrs := c.mapping[slot]
 	c.mu.Unlock()
-	if addr == "" {
+	if len(addrs) == 0 || addrs[0] == "" {
 		return nil, errNoNodeForSlot
 	}
-	return c.getConnForAddr(addr, forceDial)
+	return c.getConnForAddr(addrs[0], forceDial)
 }
 
 // a *rand.Rand is not safe for concurrent access
