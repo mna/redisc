@@ -119,6 +119,7 @@ func (c *Cluster) needsRefresh(re *RedirError) {
 type slotMapping struct {
 	start, end int
 	master     string
+	slaves     []string
 }
 
 func (c *Cluster) getClusterSlots(addr string) ([]slotMapping, error) {
@@ -142,17 +143,29 @@ func (c *Cluster) getClusterSlots(addr string) ([]slotMapping, error) {
 		}
 
 		var start, end int
-		var node []interface{}
-		if _, err = redis.Scan(slotRange, &start, &end, &node); err != nil {
-			return nil, err
-		}
-		var addr string
-		var port int
-		if _, err = redis.Scan(node, &addr, &port); err != nil {
+		var nodes []interface{}
+		if _, err = redis.Scan(slotRange, &start, &end, &nodes); err != nil {
 			return nil, err
 		}
 
-		m = append(m, slotMapping{start: start, end: end, master: addr + ":" + strconv.Itoa(port)})
+		sm := slotMapping{start: start, end: end}
+		// store the master address and all slaves
+		for len(nodes) > 0 {
+			var addr string
+			var port int
+			nodes, err = redis.Scan(nodes, &addr, &port)
+			if err != nil {
+				return nil, err
+			}
+
+			if sm.master == "" {
+				sm.master = addr + ":" + strconv.Itoa(port)
+			} else {
+				sm.slaves = append(sm.slaves, addr+":"+strconv.Itoa(port))
+			}
+		}
+
+		m = append(m, sm)
 	}
 
 	return m, nil
