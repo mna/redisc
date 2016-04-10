@@ -1,6 +1,7 @@
 // Package redisc implements a redis cluster client on top of
 // the redigo client package. It supports all commands that can
-// be executed on a redis cluster, including pub-sub and scripts.
+// be executed on a redis cluster (except READONLY/READWRITE,
+// which will be added eventually), including pub-sub and scripts.
 // See http://redis.io/topics/cluster-spec for details.
 //
 // Design
