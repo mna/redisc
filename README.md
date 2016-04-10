@@ -1,4 +1,4 @@
-# redisc [![GoDoc](https://godoc.org/github.com/PuerkitoBio/redisc?status.png)][godoc]
+# redisc [![GoDoc](https://godoc.org/github.com/PuerkitoBio/redisc?status.png)][godoc] [![Build Status](https://semaphoreci.com/api/v1/mna/redisc/branches/master/badge.svg)](https://semaphoreci.com/mna/redisc)
 
 Package redisc implements a redis cluster client built on top of the [redigo package][redigo]. See the [godoc][] for details.
 
