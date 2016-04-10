@@ -311,7 +311,12 @@ func TestCommands(t *testing.T) {
 			{"APPEND", redis.Args{"s1", "a"}, int64(1), ""},
 			{"BITCOUNT", redis.Args{"s1"}, int64(3), ""},
 			{"GET", redis.Args{"s1"}, []byte("a"), ""},
-			// TODO : complete commands...
+			{"MSET", redis.Args{"s2", "b", "s3", "c"}, "", "CROSSSLOT"},
+			{"SET", redis.Args{"s{b}", "b"}, "OK", ""},
+			{"SET", redis.Args{"s{bcd}", "c"}, "OK", ""},
+			// keys "b" (3300) and "bcd" (1872) are both in a hash slot < 5000, so on same node for this test
+			// yet it still fails with CROSSSLOT.
+			{"MGET", redis.Args{"s{b}", "s{bcd}"}, "", "CROSSSLOT"},
 		},
 		"transactions": {
 			{"DISCARD", nil, "", "ERR DISCARD without MULTI"},
