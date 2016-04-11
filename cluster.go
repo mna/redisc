@@ -218,14 +218,27 @@ func (c *Cluster) getConnForAddr(addr string, forceDial bool) (redis.Conn, error
 
 var errNoNodeForSlot = errors.New("redisc: no node for slot")
 
-func (c *Cluster) getConnForSlot(slot int, forceDial bool) (redis.Conn, error) {
+func (c *Cluster) getConnForSlot(slot int, forceDial, readOnly bool) (redis.Conn, error) {
 	c.mu.Lock()
 	addrs := c.mapping[slot]
 	c.mu.Unlock()
 	if len(addrs) == 0 || addrs[0] == "" {
 		return nil, errNoNodeForSlot
 	}
-	return c.getConnForAddr(addrs[0], forceDial)
+
+	// mapping slices are never altered, they are replaced when refreshing
+	// or on a MOVED response, so it's non-racy to read them outside the lock.
+	addr := addrs[0]
+	if readOnly && len(addrs) > 1 {
+		// get the address of a slave
+		if len(addrs) == 2 {
+			addr = addrs[1]
+		} else {
+			ix := rnd.Intn(len(addrs) - 1)
+			addr = addrs[ix+1] // +1 because 0 is the master
+		}
+	}
+	return c.getConnForAddr(addr, forceDial)
 }
 
 // a *rand.Rand is not safe for concurrent access
@@ -250,9 +263,9 @@ func (c *Cluster) getRandomConn(forceDial bool) (redis.Conn, error) {
 	return nil, errors.New("redisc: failed to get a connection")
 }
 
-func (c *Cluster) getConn(preferredSlot int, forceDial bool) (conn redis.Conn, err error) {
+func (c *Cluster) getConn(preferredSlot int, forceDial, readOnly bool) (conn redis.Conn, err error) {
 	if preferredSlot >= 0 {
-		conn, err = c.getConnForSlot(preferredSlot, forceDial)
+		conn, err = c.getConnForSlot(preferredSlot, forceDial, readOnly)
 		if err == errNoNodeForSlot {
 			c.needsRefresh(nil)
 		}

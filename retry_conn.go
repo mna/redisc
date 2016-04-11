@@ -61,7 +61,8 @@ func (rc *retryConn) do(cmd string, args ...interface{}) (interface{}, error) {
 		}
 
 		// handle redirection
-		conn, err := cluster.getConnForSlot(re.NewSlot, rc.c.forceDial)
+		// TODO : should it pass the current forceDial and readOnly?
+		conn, err := cluster.getConnForSlot(re.NewSlot, rc.c.forceDial, rc.c.readOnly)
 		if err != nil {
 			// could not get connection to that node, return that error
 			return nil, err
