@@ -187,6 +187,42 @@ func (c *Conn) Bind(keys ...string) error {
 	return nil
 }
 
+// ReadOnlyConn is a convenience function that checks if c implements
+// a ReadOnly method with the right signature such as the one for
+// a *Conn, and calls that method. If c doesn't implement that
+// method, it returns an error.
+func ReadOnlyConn(c redis.Conn) error {
+	if cc, ok := c.(interface {
+		ReadOnly() error
+	}); ok {
+		return cc.ReadOnly()
+	}
+	return errors.New("redisc: no ReadOnly method")
+}
+
+// ReadOnly marks the connection as read-only, meaning that when it is
+// bound to a cluster node, it will attempt to connect to a slave instead
+// of the master. Be aware that reading from a slave may return stale
+// data. Sending write commands on a read-only connection will fail.
+// See http://redis.io/commands/readonly for more details.
+//
+// If the connection is already bound to a node, either via a call to
+// Do, Send, Receive or Bind, ReadOnly returns an error.
+func (c *Conn) ReadOnly() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.err != nil {
+		return c.err
+	}
+	if c.rc != nil {
+		// was already bound
+		return errors.New("redisc: connection already bound to a node")
+	}
+	c.readOnly = true
+	return nil
+}
+
 // Do sends a command to the server and returns the received reply.
 // If the connection is not yet bound to a cluster node, it will be
 // after this call, based on the rules documented in the Conn type.

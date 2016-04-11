@@ -11,6 +11,27 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestConnReadOnly(t *testing.T) {
+	fn, ports := redistest.StartCluster(t, nil)
+	defer fn()
+
+	c := &Cluster{
+		StartupNodes: []string{":" + ports[0]},
+	}
+	require.NoError(t, c.Refresh(), "Refresh")
+
+	conn := c.Get()
+	defer conn.Close()
+	cc := conn.(*Conn)
+	assert.NoError(t, cc.ReadOnly(), "ReadOnly")
+
+	conn2 := c.Get()
+	defer conn2.Close()
+	cc2 := conn2.(*Conn)
+	assert.NoError(t, cc2.Bind(), "Bind")
+	assert.Error(t, cc2.ReadOnly(), "ReadOnly after Bind")
+}
+
 func TestConnBind(t *testing.T) {
 	fn, ports := redistest.StartCluster(t, nil)
 	defer fn()
@@ -70,6 +91,9 @@ func TestConnClose(t *testing.T) {
 	}
 	cc := conn.(*Conn)
 	if assert.Error(t, cc.Bind("A"), "Bind after Close") {
+		assert.Contains(t, err.Error(), "redisc: closed", "expected message")
+	}
+	if assert.Error(t, cc.ReadOnly(), "ReadOnly after Close") {
 		assert.Contains(t, err.Error(), "redisc: closed", "expected message")
 	}
 }
