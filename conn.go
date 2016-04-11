@@ -40,6 +40,7 @@ var _ redis.Conn = (*Conn)(nil)
 type Conn struct {
 	cluster   *Cluster
 	forceDial bool
+	readOnly  bool
 
 	// redigo allows concurrent reader and writer (conn.Receive and
 	// conn.Send/conn.Flush), a mutex is needed to protect concurrent

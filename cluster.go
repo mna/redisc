@@ -202,6 +202,11 @@ func (c *Cluster) getConnForAddr(addr string, forceDial bool) (redis.Conn, error
 			}
 			c.pools[addr] = pool
 			p = pool
+		} else {
+			// Don't assume CreatePool just returned the pool struct, it may have
+			// used a connection or something - always match CreatePool with Close.
+			// Do it in a defer to keep lock time short.
+			defer pool.Close()
 		}
 	}
 
