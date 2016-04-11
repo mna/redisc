@@ -60,9 +60,15 @@ func (rc *retryConn) do(cmd string, args ...interface{}) (interface{}, error) {
 			return v, err
 		}
 
-		// handle redirection
-		// TODO : should it pass the current forceDial and readOnly?
-		conn, err := cluster.getConnForSlot(re.NewSlot, rc.c.forceDial, rc.c.readOnly)
+		// handle redirection - if the redirection if to the same slot and
+		// readOnly is true, then use readOnly=false, that means READWRITE
+		// was sent on the connection and it is not allowed to read from the
+		// slave anymore.
+		rc.c.mu.Lock()
+		newReadOnly := rc.c.readOnly
+		rc.c.mu.Unlock()
+		// forceDial doesn't require locking (immutable)
+		conn, err := cluster.getConnForSlot(re.NewSlot, rc.c.forceDial, newReadOnly)
 		if err != nil {
 			// could not get connection to that node, return that error
 			return nil, err
@@ -70,8 +76,9 @@ func (rc *retryConn) do(cmd string, args ...interface{}) (interface{}, error) {
 
 		rc.c.mu.Lock()
 		// close and replace the old connection
-		rc.c.rc.Close()
+		rc.c.closeLocked()
 		rc.c.rc = conn
+		rc.c.readOnly = newReadOnly
 		rc.c.mu.Unlock()
 
 		asking = re.Type == "ASK"

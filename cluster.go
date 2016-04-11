@@ -209,7 +209,6 @@ func (c *Cluster) getConnForAddr(addr string, forceDial bool) (redis.Conn, error
 			defer pool.Close()
 		}
 	}
-
 	c.mu.Unlock()
 
 	conn := p.Get()
@@ -234,11 +233,17 @@ func (c *Cluster) getConnForSlot(slot int, forceDial, readOnly bool) (redis.Conn
 		if len(addrs) == 2 {
 			addr = addrs[1]
 		} else {
+			rnd.Lock()
 			ix := rnd.Intn(len(addrs) - 1)
+			rnd.Unlock()
 			addr = addrs[ix+1] // +1 because 0 is the master
 		}
 	}
-	return c.getConnForAddr(addr, forceDial)
+	conn, err := c.getConnForAddr(addr, forceDial)
+	if err == nil && readOnly {
+		conn.Do("READONLY")
+	}
+	return conn, err
 }
 
 // a *rand.Rand is not safe for concurrent access
@@ -271,6 +276,7 @@ func (c *Cluster) getConn(preferredSlot int, forceDial, readOnly bool) (conn red
 		}
 	}
 	if preferredSlot < 0 || err != nil {
+		// TODO : should it take readOnly into account for random conns?
 		conn, err = c.getRandomConn(forceDial)
 	}
 	return conn, err

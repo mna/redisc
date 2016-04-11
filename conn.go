@@ -39,15 +39,15 @@ var _ redis.Conn = (*Conn)(nil)
 //
 type Conn struct {
 	cluster   *Cluster
-	forceDial bool
-	readOnly  bool
+	forceDial bool // immutable
 
 	// redigo allows concurrent reader and writer (conn.Receive and
 	// conn.Send/conn.Flush), a mutex is needed to protect concurrent
 	// accesses.
-	mu  sync.Mutex
-	err error
-	rc  redis.Conn
+	mu       sync.Mutex
+	readOnly bool
+	err      error
+	rc       redis.Conn
 }
 
 // RedirError is a cluster redirection error. It indicates that
@@ -303,10 +303,19 @@ func (c *Conn) Close() error {
 	err := c.err
 	if err == nil {
 		c.err = errors.New("redisc: closed")
-		if c.rc != nil {
-			err = c.rc.Close()
-		}
+		err = c.closeLocked()
 	}
 	c.mu.Unlock()
+	return err
+}
+
+func (c *Conn) closeLocked() (err error) {
+	if c.rc != nil {
+		// this may be a pooled connection, so make sure the readOnly flag is reset
+		if c.readOnly {
+			c.rc.Do("READWRITE")
+		}
+		err = c.rc.Close()
+	}
 	return err
 }
