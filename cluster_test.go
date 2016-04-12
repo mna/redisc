@@ -54,37 +54,6 @@ func TestClusterRefresh(t *testing.T) {
 	}
 }
 
-func TestClusterWithReplicasRefresh(t *testing.T) {
-	fn, ports := redistest.StartClusterWithReplicas(t, nil)
-	defer fn()
-
-	c := &Cluster{
-		StartupNodes: []string{":" + ports[0]},
-	}
-
-	err := c.Refresh()
-	if assert.NoError(t, err, "Refresh") {
-		var prev string
-		pix := -1
-		for ix, node := range c.mapping {
-			if assert.Equal(t, 2, len(node), "Mapping for slot %d must have 2 nodes", ix) {
-				if node[0] != prev || ix == len(c.mapping)-1 {
-					prev = node[0]
-					t.Logf("%5d: %s\n", ix, node[0])
-					pix++
-				}
-				if assert.NotEmpty(t, node[0]) {
-					split0, split1 := strings.Index(node[0], ":"), strings.Index(node[1], ":")
-					assert.Contains(t, ports, node[0][split0+1:], "expected address")
-					assert.Contains(t, ports, node[1][split1+1:], "expected address")
-				}
-			} else {
-				break
-			}
-		}
-	}
-}
-
 func TestClusterRefreshAllFail(t *testing.T) {
 	s := redistest.StartMockServer(t, func(cmd string, args ...string) interface{} {
 		return resp.Error("nope")
