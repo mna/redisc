@@ -207,7 +207,7 @@ func ReadOnlyConn(c redis.Conn) error {
 // of the master and will emit a READONLY command so that the slave
 // agrees to serve read commands. Be aware that reading from a slave
 // may return stale data. Sending write commands on a read-only
-// connection will fail.
+// connection will fail with a MOVED error.
 // See http://redis.io/commands/readonly for more details.
 //
 // If the connection is already bound to a node, either via a call to

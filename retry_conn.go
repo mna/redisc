@@ -70,8 +70,10 @@ func (rc *retryConn) do(cmd string, args ...interface{}) (interface{}, error) {
 		if readOnly {
 			// check if the connection was already made to that slot, meaning
 			// that the redirection is because the command can't be served
-			// by the slave and a non-readonly connection must be made to
-			// the slot's master.
+			// by the replica and a non-readonly connection must be made to
+			// the slot's master. If that's not the case, then keep the
+			// readonly flag to true, meaning that it will attempt a connection
+			// to a replica for the new slot.
 			cluster.mu.Lock()
 			slotMappings := cluster.mapping[re.NewSlot]
 			cluster.mu.Unlock()
@@ -88,7 +90,7 @@ func (rc *retryConn) do(cmd string, args ...interface{}) (interface{}, error) {
 		}
 
 		rc.c.mu.Lock()
-		// close and replace the old connection
+		// close and replace the old connection (close must come before assignments)
 		rc.c.closeLocked()
 		rc.c.rc = conn
 		rc.c.boundAddr = addr
@@ -96,7 +98,6 @@ func (rc *retryConn) do(cmd string, args ...interface{}) (interface{}, error) {
 		rc.c.mu.Unlock()
 
 		asking = re.Type == "ASK"
-
 		att++
 	}
 	return nil, errors.New("redisc: too many attempts")
