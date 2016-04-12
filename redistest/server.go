@@ -47,39 +47,39 @@ func StartServer(t *testing.T, w io.Writer, conf string) (*exec.Cmd, string) {
 	return startServerWithConfig(t, port, w, conf), port
 }
 
-// StartClusterWithSlaves starts a redis cluster of 3 nodes with
-// 1 slave each. It returns the cleanup function to call after use
+// StartClusterWithReplicas starts a redis cluster of 3 nodes with
+// 1 replica each. It returns the cleanup function to call after use
 // (typically in a defer) and the list of ports for each node,
-// masters first, then slaves.
-func StartClusterWithSlaves(t *testing.T, w io.Writer) (func(), []string) {
+// masters first, then replicas.
+func StartClusterWithReplicas(t *testing.T, w io.Writer) (func(), []string) {
 	fn, ports := StartCluster(t, w)
 
-	var slavePorts []string
-	var slaveCmds []*exec.Cmd
+	var replicaPorts []string
+	var replicaCmds []*exec.Cmd
 	for _, master := range ports {
 		port := getClusterFreePort(t)
 		cmd := startServerWithConfig(t, port, w, fmt.Sprintf(ClusterConfig, port))
-		setupSlave(t, master, port)
-		slavePorts = append(slavePorts, port)
-		slaveCmds = append(slaveCmds, cmd)
+		setupReplica(t, master, port)
+		replicaPorts = append(replicaPorts, port)
+		replicaCmds = append(replicaCmds, cmd)
 	}
 
-	// wait for the slaves to catch up
-	require.True(t, waitForCluster(t, 10*time.Second, slavePorts...), "wait for cluster slaves")
+	// wait for the replicas to catch up
+	require.True(t, waitForCluster(t, 10*time.Second, replicaPorts...), "wait for cluster replicas")
 	time.Sleep(5 * time.Second) // TODO : better waitForCuster
 
 	return func() {
-		for _, c := range slaveCmds {
+		for _, c := range replicaCmds {
 			c.Process.Kill()
 		}
-		for _, port := range slavePorts {
+		for _, port := range replicaPorts {
 			if strings.HasPrefix(port, ":") {
 				port = port[1:]
 			}
 			os.Remove(filepath.Join(os.TempDir(), fmt.Sprintf("nodes.%s.conf", port)))
 		}
 		fn()
-	}, append(ports, slavePorts...)
+	}, append(ports, replicaPorts...)
 }
 
 // StartCluster starts a redis cluster of 3 nodes using the
@@ -158,16 +158,16 @@ func printClusterSlots(t *testing.T, port string) {
 	fmt.Println(string(b))
 }
 
-func setupSlave(t *testing.T, masterPort, slavePort string) {
-	conn, err := redis.Dial("tcp", ":"+slavePort)
-	require.NoError(t, err, "Dial to slave node")
+func setupReplica(t *testing.T, masterPort, replicaPort string) {
+	conn, err := redis.Dial("tcp", ":"+replicaPort)
+	require.NoError(t, err, "Dial to replica node")
 	defer conn.Close()
 
 	// join the cluster
 	_, err = conn.Do("CLUSTER", "MEET", "127.0.0.1", masterPort)
 	require.NoError(t, err, "CLUSTER MEET")
 
-	waitForCluster(t, 10*time.Second, slavePort)
+	waitForCluster(t, 10*time.Second, replicaPort)
 
 	// grab the master's ID
 	nodes, err := redis.String(conn.Do("CLUSTER", "NODES"))

@@ -54,8 +54,8 @@ func TestClusterRefresh(t *testing.T) {
 	}
 }
 
-func TestClusterWithSlavesRefresh(t *testing.T) {
-	fn, ports := redistest.StartClusterWithSlaves(t, nil)
+func TestClusterWithReplicasRefresh(t *testing.T) {
+	fn, ports := redistest.StartClusterWithReplicas(t, nil)
 	defer fn()
 
 	c := &Cluster{
