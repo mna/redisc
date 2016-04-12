@@ -19,16 +19,71 @@ func TestConnReadOnlyWithReplicas(t *testing.T) {
 	fn, ports := redistest.StartClusterWithReplicas(t, nil)
 	defer fn()
 
-	c := &Cluster{
-		StartupNodes: []string{":" + ports[0]},
-	}
-	testWithReplicaClusterRefresh(t, c, ports)
-
-	c = &Cluster{}
+	c := &Cluster{}
 	testWithReplicaBindRandomWithoutNode(t, c)
 
 	c = &Cluster{StartupNodes: []string{":" + ports[0]}}
 	testWithReplicaBindEmptySlot(t, c)
+
+	c = &Cluster{StartupNodes: []string{":" + ports[0]}}
+	testWithReplicaClusterRefresh(t, c, ports)
+
+	// at this point the cluster has refreshed its mapping
+	testReadWriteFromReplica(t, c, ports[3:])
+}
+
+func testReadWriteFromReplica(t *testing.T, c *Cluster, replicas []string) {
+	conn1 := c.Get()
+	defer conn1.Close()
+
+	_, err := conn1.Do("SET", "k1", "a")
+	assert.NoError(t, err, "SET on master")
+
+	conn2 := c.Get().(*Conn)
+	defer conn2.Close()
+	ReadOnlyConn(conn2)
+
+	// can read the key from the replica (may take a moment to replicate,
+	// so retry a few times)
+	var got string
+	deadline := time.Now().Add(100 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		got, err = redis.String(conn2.Do("GET", "k1"))
+		if err != nil && got == "a" {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if assert.NoError(t, err, "GET from replica") {
+		assert.Equal(t, "a", got, "expected value")
+	}
+
+	// bound address should be a replica
+	conn2.mu.Lock()
+	addr := conn2.boundAddr
+	conn2.mu.Unlock()
+	found := false
+	for _, port := range replicas {
+		if strings.HasSuffix(addr, ":"+port) {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "Bound address is a replica")
+
+	// write command should fail with a MOVED
+	if _, err = conn2.Do("SET", "k1", "b"); assert.Error(t, err, "SET on ReadOnly conn") {
+		assert.Contains(t, err.Error(), "MOVED", "MOVED error")
+	}
+
+	// sending READWRITE switches the connection back to read from master
+	_, err = conn2.Do("READWRITE")
+	assert.NoError(t, err, "READWRITE")
+
+	// now even a GET fails with a MOVED
+	if _, err = conn2.Do("GET", "k1"); assert.Error(t, err, "GET on replica conn after READWRITE") {
+		assert.Contains(t, err.Error(), "MOVED", "MOVED error")
+	}
 }
 
 func testWithReplicaBindEmptySlot(t *testing.T, c *Cluster) {
