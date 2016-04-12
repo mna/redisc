@@ -129,10 +129,10 @@ func (c *Cluster) needsRefresh(re *RedirError) {
 	c.mu.Lock()
 	if re != nil {
 		// update the mapping only if the address has changed, so that if
-		// a READONLY slave read returns a MOVED to a master, it doesn't
-		// overwrite that slot's slaves by setting just the master (i.e. this
+		// a READONLY replica read returns a MOVED to a master, it doesn't
+		// overwrite that slot's replicas by setting just the master (i.e. this
 		// is not a MOVED because the cluster is updating, it is a MOVED
-		// because the slave cannot serve that key). Same goes for a request
+		// because the replica cannot serve that key). Same goes for a request
 		// to a random connection that gets a MOVED, should not overwrite
 		// the moved-to slot's configuration if the master's address is the same.
 		if current := c.mapping[re.NewSlot]; len(current) == 0 || current[0] != re.Addr {
@@ -181,7 +181,7 @@ func (c *Cluster) getClusterSlots(addr string) ([]slotMapping, error) {
 		}
 
 		sm := slotMapping{start: start, end: end}
-		// store the master address and all slaves
+		// store the master address and all replicas
 		for len(slotRange) > 0 {
 			var nodes []interface{}
 			slotRange, err = redis.Scan(slotRange, &nodes)
@@ -254,7 +254,7 @@ func (c *Cluster) getConnForSlot(slot int, forceDial, readOnly bool) (redis.Conn
 	// or on a MOVED response, so it's non-racy to read them outside the lock.
 	addr := addrs[0]
 	if readOnly && len(addrs) > 1 {
-		// get the address of a slave
+		// get the address of a replica
 		if len(addrs) == 2 {
 			addr = addrs[1]
 		} else {

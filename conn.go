@@ -203,9 +203,9 @@ func ReadOnlyConn(c redis.Conn) error {
 }
 
 // ReadOnly marks the connection as read-only, meaning that when it is
-// bound to a cluster node, it will attempt to connect to a slave instead
-// of the master and will emit a READONLY command so that the slave
-// agrees to serve read commands. Be aware that reading from a slave
+// bound to a cluster node, it will attempt to connect to a replica instead
+// of the master and will emit a READONLY command so that the replica
+// agrees to serve read commands. Be aware that reading from a replica
 // may return stale data. Sending write commands on a read-only
 // connection will fail with a MOVED error.
 // See http://redis.io/commands/readonly for more details.
