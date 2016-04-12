@@ -19,7 +19,7 @@ const hashSlots = 16384
 type Cluster struct {
 	// StartupNodes is the list of initial nodes that make up
 	// the cluster. The values are expected as "address:port"
-	// (e.g.: "111.222.333.444:6379").
+	// (e.g.: "127.0.0.1:6379").
 	StartupNodes []string
 
 	// DialOptions is the list of options to set on each new connection.
@@ -226,12 +226,12 @@ func (c *Cluster) getConnForAddr(addr string, forceDial bool) (redis.Conn, error
 
 var errNoNodeForSlot = errors.New("redisc: no node for slot")
 
-func (c *Cluster) getConnForSlot(slot int, forceDial, readOnly bool) (redis.Conn, error) {
+func (c *Cluster) getConnForSlot(slot int, forceDial, readOnly bool) (redis.Conn, string, error) {
 	c.mu.Lock()
 	addrs := c.mapping[slot]
 	c.mu.Unlock()
 	if len(addrs) == 0 || addrs[0] == "" {
-		return nil, errNoNodeForSlot
+		return nil, "", errNoNodeForSlot
 	}
 
 	// mapping slices are never altered, they are replaced when refreshing
@@ -252,7 +252,7 @@ func (c *Cluster) getConnForSlot(slot int, forceDial, readOnly bool) (redis.Conn
 	if err == nil && readOnly {
 		conn.Do("READONLY")
 	}
-	return conn, err
+	return conn, addr, err
 }
 
 // a *rand.Rand is not safe for concurrent access
@@ -261,34 +261,35 @@ var rnd = struct {
 	*rand.Rand
 }{Rand: rand.New(rand.NewSource(time.Now().UnixNano()))}
 
-func (c *Cluster) getRandomConn(forceDial bool) (redis.Conn, error) {
+func (c *Cluster) getRandomConn(forceDial, readOnly bool) (redis.Conn, string, error) {
 	addrs := c.getNodeAddrs()
 	rnd.Lock()
 	perms := rnd.Perm(len(addrs))
 	rnd.Unlock()
 
+	// TODO : take readOnly into account, emit READONLY command on success
+
 	for _, ix := range perms {
 		addr := addrs[ix]
 		conn, err := c.getConnForAddr(addr, forceDial)
 		if err == nil {
-			return conn, nil
+			return conn, addr, nil
 		}
 	}
-	return nil, errors.New("redisc: failed to get a connection")
+	return nil, "", errors.New("redisc: failed to get a connection")
 }
 
-func (c *Cluster) getConn(preferredSlot int, forceDial, readOnly bool) (conn redis.Conn, err error) {
+func (c *Cluster) getConn(preferredSlot int, forceDial, readOnly bool) (conn redis.Conn, addr string, err error) {
 	if preferredSlot >= 0 {
-		conn, err = c.getConnForSlot(preferredSlot, forceDial, readOnly)
+		conn, addr, err = c.getConnForSlot(preferredSlot, forceDial, readOnly)
 		if err == errNoNodeForSlot {
 			c.needsRefresh(nil)
 		}
 	}
 	if preferredSlot < 0 || err != nil {
-		// TODO : should it take readOnly into account for random conns?
-		conn, err = c.getRandomConn(forceDial)
+		conn, addr, err = c.getRandomConn(forceDial, readOnly)
 	}
-	return conn, err
+	return conn, addr, err
 }
 
 func (c *Cluster) getNodeAddrs() []string {

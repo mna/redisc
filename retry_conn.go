@@ -52,23 +52,36 @@ func (rc *retryConn) do(cmd string, args ...interface{}) (interface{}, error) {
 		re := ParseRedir(err)
 		if re == nil {
 			if IsTryAgain(err) {
+				// handle retry
 				time.Sleep(rc.tryAgainDelay)
 				att++
 				continue
 			}
 
+			// not a retry error nor a redirection, return result
 			return v, err
 		}
 
-		// handle redirection - if the redirection if to the same slot and
-		// readOnly is true, then use readOnly=false, that means READWRITE
-		// was sent on the connection and it is not allowed to read from the
-		// slave anymore.
+		// handle redirection
 		rc.c.mu.Lock()
-		newReadOnly := rc.c.readOnly
+		readOnly := rc.c.readOnly
+		connAddr := rc.c.boundAddr
 		rc.c.mu.Unlock()
+		if readOnly {
+			// check if the connection was already made to that slot, meaning
+			// that the redirection is because the command can't be served
+			// by the slave and a non-readonly connection must be made to
+			// the slot's master.
+			cluster.mu.Lock()
+			slotMappings := cluster.mapping[re.NewSlot]
+			cluster.mu.Unlock()
+			if isIn(slotMappings, connAddr) {
+				readOnly = false
+			}
+		}
+
 		// forceDial doesn't require locking (immutable)
-		conn, err := cluster.getConnForSlot(re.NewSlot, rc.c.forceDial, newReadOnly)
+		conn, addr, err := cluster.getConnForSlot(re.NewSlot, rc.c.forceDial, readOnly)
 		if err != nil {
 			// could not get connection to that node, return that error
 			return nil, err
@@ -78,7 +91,8 @@ func (rc *retryConn) do(cmd string, args ...interface{}) (interface{}, error) {
 		// close and replace the old connection
 		rc.c.closeLocked()
 		rc.c.rc = conn
-		rc.c.readOnly = newReadOnly
+		rc.c.boundAddr = addr
+		rc.c.readOnly = readOnly
 		rc.c.mu.Unlock()
 
 		asking = re.Type == "ASK"
@@ -106,4 +120,13 @@ func (rc *retryConn) Receive() (interface{}, error) {
 
 func (rc *retryConn) Flush() error {
 	return errors.New("redisc: unsupported call to Flush")
+}
+
+func isIn(list []string, v string) bool {
+	for _, vv := range list {
+		if v == vv {
+			return true
+		}
+	}
+	return false
 }
