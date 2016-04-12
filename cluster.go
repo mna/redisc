@@ -112,7 +112,16 @@ func (c *Cluster) refresh() error {
 func (c *Cluster) needsRefresh(re *RedirError) {
 	c.mu.Lock()
 	if re != nil {
-		c.mapping[re.NewSlot] = []string{re.Addr}
+		// update the mapping only if the address has changed, so that if
+		// a READONLY slave read returns a MOVED to a master, it doesn't
+		// overwrite that slot's slaves by setting just the master (i.e. this
+		// is not a MOVED because the cluster is updating, it is a MOVED
+		// because the slave cannot serve that key). Same goes for a request
+		// to a random connection that gets a MOVED, should not overwrite
+		// the moved-to slot's configuration if the master's address is the same.
+		if current := c.mapping[re.NewSlot]; len(current) == 0 || current[0] != re.Addr {
+			c.mapping[re.NewSlot] = []string{re.Addr}
+		}
 	}
 	if !c.refreshing {
 		// refreshing is reset to only once the goroutine has
