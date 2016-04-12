@@ -25,6 +25,14 @@ func TestConnReadOnly(t *testing.T) {
 	cc := conn.(*Conn)
 	assert.NoError(t, cc.ReadOnly(), "ReadOnly")
 
+	// both get and set work, because the connection is on a master
+	_, err := cc.Do("SET", "b", 1)
+	assert.NoError(t, err, "SET")
+	v, err := redis.Int(cc.Do("GET", "b"))
+	if assert.NoError(t, err, "GET") {
+		assert.Equal(t, 1, v, "expected result")
+	}
+
 	conn2 := c.Get()
 	defer conn2.Close()
 	cc2 := conn2.(*Conn)
