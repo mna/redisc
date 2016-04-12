@@ -53,20 +53,28 @@ func StartServer(t *testing.T, w io.Writer, conf string) (*exec.Cmd, string) {
 // masters first, then replicas.
 func StartClusterWithReplicas(t *testing.T, w io.Writer) (func(), []string) {
 	fn, ports := StartCluster(t, w)
+	mapping := getClusterNodeIDs(t, ports...)
 
 	var replicaPorts []string
 	var replicaCmds []*exec.Cmd
+	replicaMaster := make(map[string]string)
 	for _, master := range ports {
 		port := getClusterFreePort(t)
 		cmd := startServerWithConfig(t, port, w, fmt.Sprintf(ClusterConfig, port))
-		setupReplica(t, master, port)
+		joinCluster(t, port, master)
+
 		replicaPorts = append(replicaPorts, port)
 		replicaCmds = append(replicaCmds, cmd)
+		replicaMaster[port] = master
 	}
 
-	// wait for the replicas to catch up
+	// wait for the cluster to stabilize
 	require.True(t, waitForCluster(t, 10*time.Second, replicaPorts...), "wait for cluster replicas")
-	time.Sleep(5 * time.Second) // TODO : better waitForCuster
+	for _, port := range replicaPorts {
+		setupReplica(t, port, mapping[replicaMaster[port]])
+	}
+	// wait for replicas to join
+	require.True(t, waitForReplicas(t, 10*time.Second, append(ports, replicaPorts...)...), "wait for cluster replicas")
 
 	return func() {
 		for _, c := range replicaCmds {
@@ -118,7 +126,10 @@ func StartCluster(t *testing.T, w io.Writer) (func(), []string) {
 			// add all remaining slots in the last node
 			countSlots = hashSlots - (i * slotsPerNode)
 		}
-		setupClusterNode(t, port, meetPort, i*slotsPerNode, countSlots)
+		setupClusterNode(t, port, i*slotsPerNode, countSlots)
+		if meetPort != "" {
+			joinCluster(t, port, meetPort)
+		}
 	}
 
 	// wait for the cluster to catch up
@@ -158,37 +169,53 @@ func printClusterSlots(t *testing.T, port string) {
 	fmt.Println(string(b))
 }
 
-func setupReplica(t *testing.T, masterPort, replicaPort string) {
-	conn, err := redis.Dial("tcp", ":"+replicaPort)
-	require.NoError(t, err, "Dial to replica node")
+func joinCluster(t *testing.T, nodePort, clusterPort string) {
+	conn, err := redis.Dial("tcp", ":"+nodePort)
+	require.NoError(t, err, "Dial to node")
 	defer conn.Close()
 
 	// join the cluster
-	_, err = conn.Do("CLUSTER", "MEET", "127.0.0.1", masterPort)
+	_, err = conn.Do("CLUSTER", "MEET", "127.0.0.1", clusterPort)
 	require.NoError(t, err, "CLUSTER MEET")
+}
 
-	waitForCluster(t, 10*time.Second, replicaPort)
+func getClusterNodeIDs(t *testing.T, ports ...string) map[string]string {
+	if len(ports) == 0 {
+		return nil
+	}
 
-	// grab the master's ID
+	conn, err := redis.Dial("tcp", ":"+ports[0])
+	require.NoError(t, err, "Dial to node")
+	defer conn.Close()
+
 	nodes, err := redis.String(conn.Do("CLUSTER", "NODES"))
 	require.NoError(t, err, "CLUSTER NODES")
 
-	var masterID string
+	mapping := make(map[string]string)
 	s := bufio.NewScanner(strings.NewReader(nodes))
 	for s.Scan() {
 		fields := strings.Fields(s.Text())
-		if fields[1] == "127.0.0.1:"+masterPort {
-			masterID = fields[0]
-			break
+		for _, port := range ports {
+			if fields[1] == "127.0.0.1:"+port {
+				mapping[port] = fields[0]
+				break
+			}
 		}
 	}
-	require.NotEmpty(t, masterID, "Find master ID")
+	require.Equal(t, len(ports), len(mapping), "Find IDs for all ports")
+	return mapping
+}
+
+func setupReplica(t *testing.T, replicaPort, masterID string) {
+	conn, err := redis.Dial("tcp", ":"+replicaPort)
+	require.NoError(t, err, "Dial to replica node")
+	defer conn.Close()
 
 	_, err = conn.Do("CLUSTER", "REPLICATE", masterID)
 	require.NoError(t, err, "CLUSTER REPLICATE")
 }
 
-func setupClusterNode(t *testing.T, port, meetPort string, start, count int) {
+func setupClusterNode(t *testing.T, port string, start, count int) {
 	conn, err := redis.Dial("tcp", ":"+port)
 	require.NoError(t, err, "Dial to cluster node")
 	defer conn.Close()
@@ -200,12 +227,44 @@ func setupClusterNode(t *testing.T, port, meetPort string, start, count int) {
 
 	_, err = conn.Do("CLUSTER", args...)
 	require.NoError(t, err, "CLUSTER ADDSLOTS")
+}
 
-	if meetPort != "" {
-		// join the cluster
-		_, err = conn.Do("CLUSTER", "MEET", "127.0.0.1", meetPort)
-		require.NoError(t, err, "CLUSTER MEET")
+func waitForReplicas(t *testing.T, timeout time.Duration, ports ...string) bool {
+	deadline := time.Now().Add(timeout)
+
+	for _, port := range ports {
+		conn, err := redis.Dial("tcp", ":"+port)
+		require.NoError(t, err, "Dial")
+
+		for time.Now().Before(deadline) {
+			v, err := redis.String(conn.Do("CLUSTER", "NODES"))
+			require.NoError(t, err, "CLUSTER NODES")
+
+			ms, rs := 0, 0
+			s := bufio.NewScanner(strings.NewReader(v))
+			for s.Scan() {
+				fields := strings.Fields(s.Text())
+				if fields[7] == "connected" {
+					if strings.Contains(fields[2], "master") {
+						ms++
+					} else {
+						rs++
+					}
+				}
+			}
+			if ms == 3 && rs == 3 {
+				break
+			}
+
+			time.Sleep(100 * time.Millisecond)
+		}
+		conn.Close()
+
+		if time.Now().After(deadline) {
+			return false
+		}
 	}
+	return true
 }
 
 func waitForCluster(t *testing.T, timeout time.Duration, ports ...string) bool {
