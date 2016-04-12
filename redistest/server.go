@@ -30,6 +30,11 @@ cluster-node-timeout 5000
 appendonly no
 `
 
+// NumClusterNodes is the number of nodes started in a test cluster.
+// When a cluster is started with replicas, there is 1 replica per
+// cluster node, so the total number of nodes is NumClusterNodes * 2.
+const NumClusterNodes = 3
+
 // StartServer starts a redis-server instance on a free port.
 // It returns the started *exec.Cmd and the port used. The caller
 // should make sure to stop the command. If the redis-server
@@ -47,7 +52,7 @@ func StartServer(t *testing.T, w io.Writer, conf string) (*exec.Cmd, string) {
 	return startServerWithConfig(t, port, w, conf), port
 }
 
-// StartClusterWithReplicas starts a redis cluster of 3 nodes with
+// StartClusterWithReplicas starts a redis cluster of NumClusterNodes with
 // 1 replica each. It returns the cleanup function to call after use
 // (typically in a defer) and the list of ports for each node,
 // masters first, then replicas.
@@ -90,7 +95,7 @@ func StartClusterWithReplicas(t *testing.T, w io.Writer) (func(), []string) {
 	}, append(ports, replicaPorts...)
 }
 
-// StartCluster starts a redis cluster of 3 nodes using the
+// StartCluster starts a redis cluster of NumClusterNodes using the
 // ClusterConfig variable as configuration. If w is not nil,
 // stdout and stderr of each node will be written to it.
 //
@@ -102,16 +107,13 @@ func StartCluster(t *testing.T, w io.Writer) (func(), []string) {
 		t.Skip("redis-server not found in $PATH")
 	}
 
-	const (
-		numNodes  = 3
-		hashSlots = 16384
-	)
+	const hashSlots = 16384
 
-	cmds := make([]*exec.Cmd, numNodes)
-	ports := make([]string, numNodes)
-	slotsPerNode := hashSlots / numNodes
+	cmds := make([]*exec.Cmd, NumClusterNodes)
+	ports := make([]string, NumClusterNodes)
+	slotsPerNode := hashSlots / NumClusterNodes
 
-	for i := 0; i < numNodes; i++ {
+	for i := 0; i < NumClusterNodes; i++ {
 		port := getClusterFreePort(t)
 		cmd := startServerWithConfig(t, port, w, fmt.Sprintf(ClusterConfig, port))
 		cmds[i], ports[i] = cmd, port
@@ -122,7 +124,7 @@ func StartCluster(t *testing.T, w io.Writer) (func(), []string) {
 			meetPort = ports[i-1]
 		}
 		countSlots := slotsPerNode
-		if i == numNodes-1 {
+		if i == NumClusterNodes-1 {
 			// add all remaining slots in the last node
 			countSlots = hashSlots - (i * slotsPerNode)
 		}
@@ -252,7 +254,7 @@ func waitForReplicas(t *testing.T, timeout time.Duration, ports ...string) bool 
 					}
 				}
 			}
-			if ms == 3 && rs == 3 {
+			if ms == NumClusterNodes && rs == NumClusterNodes {
 				break
 			}
 

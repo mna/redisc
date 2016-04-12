@@ -29,7 +29,7 @@ func TestConnReadOnlyWithReplicas(t *testing.T) {
 	testWithReplicaClusterRefresh(t, c, ports)
 
 	// at this point the cluster has refreshed its mapping
-	testReadWriteFromReplica(t, c, ports[3:])
+	testReadWriteFromReplica(t, c, ports[redistest.NumClusterNodes:])
 }
 
 func testReadWriteFromReplica(t *testing.T, c *Cluster, replicas []string) {
