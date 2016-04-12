@@ -26,7 +26,8 @@ var _ redis.Conn = (*Conn)(nil)
 //       the specified key(s) is selected
 //
 // Because Get and Dial return a redis.Conn interface,
-// a type assertion can be used to call Bind on this concrete Conn type:
+// a type assertion can be used to call Bind or ReadOnly on this
+// concrete Conn type:
 //
 //     redisConn := cluster.Get()
 //     if conn, ok := redisConn.(*redisc.Conn); ok {
@@ -35,7 +36,7 @@ var _ redis.Conn = (*Conn)(nil)
 //       }
 //     }
 //
-// Or call the package-level BindConn helper function.
+// Or call the package-level BindConn or ReadOnlyConn helper functions.
 //
 type Conn struct {
 	cluster   *Cluster

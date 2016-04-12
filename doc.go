@@ -1,7 +1,6 @@
 // Package redisc implements a redis cluster client on top of
 // the redigo client package. It supports all commands that can
-// be executed on a redis cluster (except READONLY/READWRITE,
-// which will be added eventually), including pub-sub and scripts.
+// be executed on a redis cluster, including pub-sub and scripts.
 // See http://redis.io/topics/cluster-spec for details.
 //
 // Design
@@ -36,6 +35,10 @@
 //     relying on the automatic detection based on the first
 //     parameter of the command.
 //
+//     - *Conn.ReadOnly (or the ReadOnlyConn package-level helper
+//     function) to mark a connection as read-only, allowing
+//     commands to be served by a replica instead of the master.
+//
 //     - RetryConn to wrap a connection into one that automatically
 //     follows redirections when the cluster moves slots around.
 //
@@ -44,11 +47,15 @@
 // Cluster
 //
 // The Cluster type manages a redis cluster and offers an
-// interface compatible with redigo's redis.Pool, along with
-// a few additional methods described below:
+// interface compatible with redigo's redis.Pool:
 //
-//     - Get() redis.Conn
-//     - Close() error
+//     Get() redis.Conn
+//     Close() error
+//
+// Along with some additional methods specific to a cluster:
+//
+//     Dial() (redis.Conn, error)
+//     Refresh() error
 //
 // If the CreatePool function field is set, then a
 // redis.Pool is created to manage connections to each of the
@@ -58,9 +65,9 @@
 // The Dial method, on the other hand, guarantees that
 // the returned connection will not be managed by a pool, even if
 // CreatePool is set. It calls redigo's redis.Dial function
-// to create the unpooled connection. If the cluster's
-// CreatePool field is nil, Get behaves the same as
-// Dial.
+// to create the unpooled connection, passing along any DialOptions
+// set on the cluster. If the cluster's CreatePool field is nil,
+// Get behaves the same as Dial.
 //
 // The Refresh method refreshes the cluster's internal mapping of
 // hash slots to nodes. It should typically be called only once,
@@ -76,18 +83,21 @@
 //
 // The connection returned from Get or Dial is a redigo redis.Conn
 // interface, with a concrete type of *Conn. In addition to the
-// interface's required methods, *Conn adds the Bind method.
+// interface's required methods, *Conn adds the following methods:
+//
+//     Bind(...string) error
+//     ReadOnly() error
 //
 // The returned connection is not yet connected to any node; it is
 // "bound" to a specific node only when a call to Do, Send, Receive
-// or Bind is made. For Do, Send and Receive, to select the right
-// cluster node, it uses the first parameter of the command, and
+// or Bind is made. For Do, Send and Receive, the node selection is
+// implicit, it uses the first parameter of the command, and
 // computes the hash slot assuming that first parameter is a key.
 // It then binds the connection to the node corresponding to that
 // slot. If there are no parameters for the command, or if there is
 // no command (e.g. in a call to Receive), a random node is selected.
 //
-// Bind is different, it gives explicit control to the caller over
+// Bind is explicit, it gives control to the caller over
 // which node to select by specifying a list of keys that the caller
 // wishes to handle with the connection. All keys must belong to the
 // same slot, and the connection must not already be bound to a node,
@@ -107,6 +117,23 @@
 //
 // The BindConn package-level function is provided as a helper for
 // this common use-case.
+//
+// The ReadOnly method marks the connection as read-only, meaning that
+// it will attempt to connect to a replica instead of the master node
+// for its slot. Once bound to a node, the READONLY redis command is
+// sent automatically, so it doesn't have to be sent explicitly before
+// use. ReadOnly must be called before the connection is bound to a
+// node, otherwise an error is returned.
+//
+// For the same reason as for Bind, a type assertion must be used to
+// call ReadOnly on a *Conn, so a package-level helper function is
+// also provided, ReadOnlyConn.
+//
+// There is no ReadWrite method, because it can be sent as a normal
+// redis command and will essentially end that connection (all commands
+// will now return MOVED errors). If the connection was wrapped in
+// a RetryConn call, then it will automatically follow the redirection
+// to the master node (see the Redirections section).
 //
 // The connection must be closed after use, to release the underlying
 // resources.
@@ -143,8 +170,8 @@
 //     - Because the Do method combines the functionality of Send, Flush
 //       and Receive, it cannot be called concurrently with other methods.
 //
-//     - The Bind method is safe to call concurrently, but there is not
-//       much point in doing so as it will fail if the connection is
-//       already bound, so only one call will succeed.
+//     - The Bind and ReadOnly methods are safe to call concurrently, but
+//       there is not much point in doing so for as both will fail if
+//       the connection is already bound.
 //
 package redisc
