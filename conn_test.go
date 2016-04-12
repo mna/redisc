@@ -30,6 +30,35 @@ func TestConnReadOnlyWithReplicas(t *testing.T) {
 
 	// at this point the cluster has refreshed its mapping
 	testReadWriteFromReplica(t, c, ports[redistest.NumClusterNodes:])
+
+	testReadOnlyWithRandomConn(t, c, ports[redistest.NumClusterNodes:])
+}
+
+// assert that conn is bound to one of the specified ports.
+func assertBoundTo(t *testing.T, conn *Conn, ports []string) {
+	conn.mu.Lock()
+	addr := conn.boundAddr
+	conn.mu.Unlock()
+
+	found := false
+	for _, port := range ports {
+		if strings.HasSuffix(addr, ":"+port) {
+			found = true
+			break
+		}
+	}
+	assert.True(t, found, "Bound address")
+}
+
+func testReadOnlyWithRandomConn(t *testing.T, c *Cluster, replicas []string) {
+	conn := c.Get().(*Conn)
+	defer conn.Close()
+
+	assert.NoError(t, ReadOnlyConn(conn), "ReadOnlyConn")
+	assert.NoError(t, BindConn(conn), "BindConn")
+
+	// it should now be bound to a random replica
+	assertBoundTo(t, conn, replicas)
 }
 
 func testReadWriteFromReplica(t *testing.T, c *Cluster, replicas []string) {
@@ -59,17 +88,7 @@ func testReadWriteFromReplica(t *testing.T, c *Cluster, replicas []string) {
 	}
 
 	// bound address should be a replica
-	conn2.mu.Lock()
-	addr := conn2.boundAddr
-	conn2.mu.Unlock()
-	found := false
-	for _, port := range replicas {
-		if strings.HasSuffix(addr, ":"+port) {
-			found = true
-			break
-		}
-	}
-	assert.True(t, found, "Bound address is a replica")
+	assertBoundTo(t, conn2, replicas)
 
 	// write command should fail with a MOVED
 	if _, err = conn2.Do("SET", "k1", "b"); assert.Error(t, err, "SET on ReadOnly conn") {
