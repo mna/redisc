@@ -32,10 +32,40 @@ func TestConnReadOnlyWithReplicas(t *testing.T) {
 	testReadWriteFromReplica(t, c, ports[redistest.NumClusterNodes:])
 
 	testReadOnlyWithRandomConn(t, c, ports[redistest.NumClusterNodes:])
+
+	testRetryReadOnlyConn(t, c, ports[:redistest.NumClusterNodes], ports[redistest.NumClusterNodes:])
+}
+
+func testRetryReadOnlyConn(t *testing.T, c *Cluster, masters []string, replicas []string) {
+	conn := c.Get().(*Conn)
+	defer conn.Close()
+
+	assert.NoError(t, ReadOnlyConn(conn), "ReadOnly")
+	rc, _ := RetryConn(conn, 4, time.Second)
+
+	// keys "a" and "b" are not in the same slot - bind to "a" and
+	// then ask for "b" to force a redirect.
+	assert.NoError(t, BindConn(conn, "a"), "Bind")
+	addr1 := assertBoundTo(t, conn, replicas)
+
+	if _, err := rc.Do("GET", "b"); assert.NoError(t, err, "GET b") {
+		addr2 := assertBoundTo(t, conn, replicas)
+		assert.NotEqual(t, addr1, addr2, "Bound to different replica")
+
+		// conn is now bound to the node serving slot "b". Send a READWRITE
+		// command and get "b" again, should re-bind to the same slot, but to
+		// the master.
+		_, err := rc.Do("READWRITE")
+		assert.NoError(t, err, "READWRITE")
+		if _, err := rc.Do("GET", "b"); assert.NoError(t, err, "GET b") {
+			addr3 := assertBoundTo(t, conn, masters)
+			assert.NotEqual(t, addr2, addr3, "Bound to the master")
+		}
+	}
 }
 
 // assert that conn is bound to one of the specified ports.
-func assertBoundTo(t *testing.T, conn *Conn, ports []string) {
+func assertBoundTo(t *testing.T, conn *Conn, ports []string) string {
 	conn.mu.Lock()
 	addr := conn.boundAddr
 	conn.mu.Unlock()
@@ -48,6 +78,7 @@ func assertBoundTo(t *testing.T, conn *Conn, ports []string) {
 		}
 	}
 	assert.True(t, found, "Bound address")
+	return addr
 }
 
 func testReadOnlyWithRandomConn(t *testing.T, c *Cluster, replicas []string) {
