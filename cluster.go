@@ -19,7 +19,8 @@ const hashSlots = 16384
 type Cluster struct {
 	// StartupNodes is the list of initial nodes that make up
 	// the cluster. The values are expected as "address:port"
-	// (e.g.: "111.222.333.444:6379").
+	// (e.g.: "127.0.0.1:6379"). Only master nodes should be
+	// specified.
 	StartupNodes []string
 
 	// DialOptions is the list of options to set on each new connection.
@@ -35,8 +36,9 @@ type Cluster struct {
 	mu         sync.Mutex             // protects following fields
 	err        error                  // broken connection error
 	pools      map[string]*redis.Pool // created pools per node
-	nodes      map[string]bool        // set of known active nodes, kept up-to-date
-	mapping    [hashSlots][]string    // hash slot number to master and slave(s) server address, master is always at [0]
+	masters    map[string]bool        // set of known active master nodes, kept up-to-date
+	replicas   map[string]bool        // set of known active replica nodes, kept up-to-date
+	mapping    [hashSlots][]string    // hash slot number to master and replica(s) server addresses, master is always at [0]
 	refreshing bool                   // indicates if there's a refresh in progress
 }
 
@@ -62,36 +64,50 @@ func (c *Cluster) Refresh() error {
 }
 
 func (c *Cluster) refresh() error {
-	addrs := c.getNodeAddrs()
+	addrs := c.getNodeAddrs(false)
 	for _, addr := range addrs {
 		m, err := c.getClusterSlots(addr)
 		if err == nil {
 			// succeeded, save as mapping
 			c.mu.Lock()
 			// mark all current nodes as false
-			for k := range c.nodes {
-				c.nodes[k] = false
+			for k := range c.masters {
+				c.masters[k] = false
 			}
+			for k := range c.replicas {
+				c.replicas[k] = false
+			}
+
 			for _, sm := range m {
-				if len(sm.nodes) > 0 && sm.nodes[0] != "" {
-					c.nodes[sm.nodes[0]] = true
+				for i, node := range sm.nodes {
+					if node != "" {
+						target := c.masters
+						if i > 0 {
+							target = c.replicas
+						}
+						target[node] = true
+					}
 				}
 				for ix := sm.start; ix <= sm.end; ix++ {
 					c.mapping[ix] = sm.nodes
 				}
 			}
-			// remove all nodes that are gone from the cluster
-			for k, ok := range c.nodes {
-				if !ok {
-					delete(c.nodes, k)
 
-					// close and remove all existing pools for removed nodes
-					if p := c.pools[k]; p != nil {
-						p.Close()
-						delete(c.pools, k)
+			// remove all nodes that are gone from the cluster
+			for _, nodes := range []map[string]bool{c.masters, c.replicas} {
+				for k, ok := range nodes {
+					if !ok {
+						delete(nodes, k)
+
+						// close and remove all existing pools for removed nodes
+						if p := c.pools[k]; p != nil {
+							p.Close()
+							delete(c.pools, k)
+						}
 					}
 				}
 			}
+
 			// mark that no refresh is needed until another MOVED
 			c.refreshing = false
 			c.mu.Unlock()
@@ -112,7 +128,16 @@ func (c *Cluster) refresh() error {
 func (c *Cluster) needsRefresh(re *RedirError) {
 	c.mu.Lock()
 	if re != nil {
-		c.mapping[re.NewSlot] = []string{re.Addr}
+		// update the mapping only if the address has changed, so that if
+		// a READONLY replica read returns a MOVED to a master, it doesn't
+		// overwrite that slot's replicas by setting just the master (i.e. this
+		// is not a MOVED because the cluster is updating, it is a MOVED
+		// because the replica cannot serve that key). Same goes for a request
+		// to a random connection that gets a MOVED, should not overwrite
+		// the moved-to slot's configuration if the master's address is the same.
+		if current := c.mapping[re.NewSlot]; len(current) == 0 || current[0] != re.Addr {
+			c.mapping[re.NewSlot] = []string{re.Addr}
+		}
 	}
 	if !c.refreshing {
 		// refreshing is reset to only once the goroutine has
@@ -156,7 +181,7 @@ func (c *Cluster) getClusterSlots(addr string) ([]slotMapping, error) {
 		}
 
 		sm := slotMapping{start: start, end: end}
-		// store the master address and all slaves
+		// store the master address and all replicas
 		for len(slotRange) > 0 {
 			var nodes []interface{}
 			slotRange, err = redis.Scan(slotRange, &nodes)
@@ -209,7 +234,6 @@ func (c *Cluster) getConnForAddr(addr string, forceDial bool) (redis.Conn, error
 			defer pool.Close()
 		}
 	}
-
 	c.mu.Unlock()
 
 	conn := p.Get()
@@ -218,14 +242,35 @@ func (c *Cluster) getConnForAddr(addr string, forceDial bool) (redis.Conn, error
 
 var errNoNodeForSlot = errors.New("redisc: no node for slot")
 
-func (c *Cluster) getConnForSlot(slot int, forceDial bool) (redis.Conn, error) {
+func (c *Cluster) getConnForSlot(slot int, forceDial, readOnly bool) (redis.Conn, string, error) {
 	c.mu.Lock()
 	addrs := c.mapping[slot]
 	c.mu.Unlock()
-	if len(addrs) == 0 || addrs[0] == "" {
-		return nil, errNoNodeForSlot
+	if len(addrs) == 0 {
+		return nil, "", errNoNodeForSlot
 	}
-	return c.getConnForAddr(addrs[0], forceDial)
+
+	// mapping slices are never altered, they are replaced when refreshing
+	// or on a MOVED response, so it's non-racy to read them outside the lock.
+	addr := addrs[0]
+	if readOnly && len(addrs) > 1 {
+		// get the address of a replica
+		if len(addrs) == 2 {
+			addr = addrs[1]
+		} else {
+			rnd.Lock()
+			ix := rnd.Intn(len(addrs) - 1)
+			rnd.Unlock()
+			addr = addrs[ix+1] // +1 because 0 is the master
+		}
+	} else {
+		readOnly = false
+	}
+	conn, err := c.getConnForAddr(addr, forceDial)
+	if err == nil && readOnly {
+		conn.Do("READONLY")
+	}
+	return conn, addr, err
 }
 
 // a *rand.Rand is not safe for concurrent access
@@ -234,8 +279,8 @@ var rnd = struct {
 	*rand.Rand
 }{Rand: rand.New(rand.NewSource(time.Now().UnixNano()))}
 
-func (c *Cluster) getRandomConn(forceDial bool) (redis.Conn, error) {
-	addrs := c.getNodeAddrs()
+func (c *Cluster) getRandomConn(forceDial, readOnly bool) (redis.Conn, string, error) {
+	addrs := c.getNodeAddrs(readOnly)
 	rnd.Lock()
 	perms := rnd.Perm(len(addrs))
 	rnd.Unlock()
@@ -244,39 +289,50 @@ func (c *Cluster) getRandomConn(forceDial bool) (redis.Conn, error) {
 		addr := addrs[ix]
 		conn, err := c.getConnForAddr(addr, forceDial)
 		if err == nil {
-			return conn, nil
+			if readOnly {
+				conn.Do("READONLY")
+			}
+			return conn, addr, nil
 		}
 	}
-	return nil, errors.New("redisc: failed to get a connection")
+	return nil, "", errors.New("redisc: failed to get a connection")
 }
 
-func (c *Cluster) getConn(preferredSlot int, forceDial bool) (conn redis.Conn, err error) {
+func (c *Cluster) getConn(preferredSlot int, forceDial, readOnly bool) (conn redis.Conn, addr string, err error) {
 	if preferredSlot >= 0 {
-		conn, err = c.getConnForSlot(preferredSlot, forceDial)
+		conn, addr, err = c.getConnForSlot(preferredSlot, forceDial, readOnly)
 		if err == errNoNodeForSlot {
 			c.needsRefresh(nil)
 		}
 	}
 	if preferredSlot < 0 || err != nil {
-		conn, err = c.getRandomConn(forceDial)
+		conn, addr, err = c.getRandomConn(forceDial, readOnly)
 	}
-	return conn, err
+	return conn, addr, err
 }
 
-func (c *Cluster) getNodeAddrs() []string {
+func (c *Cluster) getNodeAddrs(preferReplicas bool) []string {
 	c.mu.Lock()
 
 	// populate nodes lazily, only once
-	if c.nodes == nil {
-		c.nodes = make(map[string]bool)
+	if c.masters == nil {
+		c.masters = make(map[string]bool)
+		c.replicas = make(map[string]bool)
+
+		// StartupNodes should be masters
 		for _, n := range c.StartupNodes {
-			c.nodes[n] = true
+			c.masters[n] = true
 		}
 	}
 
+	from := c.masters
+	if preferReplicas && len(c.replicas) > 0 {
+		from = c.replicas
+	}
+
 	// grab a slice of addresses
-	addrs := make([]string, 0, len(c.nodes))
-	for addr := range c.nodes {
+	addrs := make([]string, 0, len(from))
+	for addr := range from {
 		addrs = append(addrs, addr)
 	}
 	c.mu.Unlock()

@@ -26,7 +26,8 @@ var _ redis.Conn = (*Conn)(nil)
 //       the specified key(s) is selected
 //
 // Because Get and Dial return a redis.Conn interface,
-// a type assertion can be used to call Bind on this concrete Conn type:
+// a type assertion can be used to call Bind or ReadOnly on this
+// concrete Conn type:
 //
 //     redisConn := cluster.Get()
 //     if conn, ok := redisConn.(*redisc.Conn); ok {
@@ -35,19 +36,20 @@ var _ redis.Conn = (*Conn)(nil)
 //       }
 //     }
 //
-// Or call the package-level BindConn helper function.
+// Or call the package-level BindConn or ReadOnlyConn helper functions.
 //
 type Conn struct {
 	cluster   *Cluster
-	forceDial bool
-	readOnly  bool
+	forceDial bool // immutable
 
 	// redigo allows concurrent reader and writer (conn.Receive and
 	// conn.Send/conn.Flush), a mutex is needed to protect concurrent
 	// accesses.
-	mu  sync.Mutex
-	err error
-	rc  redis.Conn
+	mu        sync.Mutex
+	readOnly  bool
+	boundAddr string
+	err       error
+	rc        redis.Conn
 }
 
 // RedirError is a cluster redirection error. It indicates that
@@ -126,11 +128,12 @@ func (c *Conn) bind(slot int) (rc redis.Conn, ok bool, err error) {
 	rc, err = c.rc, c.err
 	if err == nil {
 		if rc == nil {
-			conn, err2 := c.cluster.getConn(slot, c.forceDial)
+			conn, addr, err2 := c.cluster.getConn(slot, c.forceDial, c.readOnly)
 			if err2 != nil {
 				err = err2
 			} else {
 				c.rc, rc = conn, conn
+				c.boundAddr = addr
 				ok = true
 			}
 		}
@@ -184,6 +187,44 @@ func (c *Conn) Bind(keys ...string) error {
 		// was already bound
 		return errors.New("redisc: connection already bound to a node")
 	}
+	return nil
+}
+
+// ReadOnlyConn is a convenience function that checks if c implements
+// a ReadOnly method with the right signature such as the one for
+// a *Conn, and calls that method. If c doesn't implement that
+// method, it returns an error.
+func ReadOnlyConn(c redis.Conn) error {
+	if cc, ok := c.(interface {
+		ReadOnly() error
+	}); ok {
+		return cc.ReadOnly()
+	}
+	return errors.New("redisc: no ReadOnly method")
+}
+
+// ReadOnly marks the connection as read-only, meaning that when it is
+// bound to a cluster node, it will attempt to connect to a replica instead
+// of the master and will automatically emit a READONLY command so that
+// the replica agrees to serve read commands. Be aware that reading
+// from a replica may return stale data. Sending write commands on a
+// read-only connection will fail with a MOVED error.
+// See http://redis.io/commands/readonly for more details.
+//
+// If the connection is already bound to a node, either via a call to
+// Do, Send, Receive or Bind, ReadOnly returns an error.
+func (c *Conn) ReadOnly() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.err != nil {
+		return c.err
+	}
+	if c.rc != nil {
+		// was already bound
+		return errors.New("redisc: connection already bound to a node")
+	}
+	c.readOnly = true
 	return nil
 }
 
@@ -267,10 +308,19 @@ func (c *Conn) Close() error {
 	err := c.err
 	if err == nil {
 		c.err = errors.New("redisc: closed")
-		if c.rc != nil {
-			err = c.rc.Close()
-		}
+		err = c.closeLocked()
 	}
 	c.mu.Unlock()
+	return err
+}
+
+func (c *Conn) closeLocked() (err error) {
+	if c.rc != nil {
+		// this may be a pooled connection, so make sure the readOnly flag is reset
+		if c.readOnly {
+			c.rc.Do("READWRITE")
+		}
+		err = c.rc.Close()
+	}
 	return err
 }

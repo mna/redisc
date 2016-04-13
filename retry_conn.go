@@ -52,29 +52,52 @@ func (rc *retryConn) do(cmd string, args ...interface{}) (interface{}, error) {
 		re := ParseRedir(err)
 		if re == nil {
 			if IsTryAgain(err) {
+				// handle retry
 				time.Sleep(rc.tryAgainDelay)
 				att++
 				continue
 			}
 
+			// not a retry error nor a redirection, return result
 			return v, err
 		}
 
 		// handle redirection
-		conn, err := cluster.getConnForSlot(re.NewSlot, rc.c.forceDial)
+		rc.c.mu.Lock()
+		readOnly := rc.c.readOnly
+		connAddr := rc.c.boundAddr
+		rc.c.mu.Unlock()
+		if readOnly {
+			// check if the connection was already made to that slot, meaning
+			// that the redirection is because the command can't be served
+			// by the replica and a non-readonly connection must be made to
+			// the slot's master. If that's not the case, then keep the
+			// readonly flag to true, meaning that it will attempt a connection
+			// to a replica for the new slot.
+			cluster.mu.Lock()
+			slotMappings := cluster.mapping[re.NewSlot]
+			cluster.mu.Unlock()
+			if isIn(slotMappings, connAddr) {
+				readOnly = false
+			}
+		}
+
+		// forceDial doesn't require locking (immutable)
+		conn, addr, err := cluster.getConnForSlot(re.NewSlot, rc.c.forceDial, readOnly)
 		if err != nil {
 			// could not get connection to that node, return that error
 			return nil, err
 		}
 
 		rc.c.mu.Lock()
-		// close and replace the old connection
-		rc.c.rc.Close()
+		// close and replace the old connection (close must come before assignments)
+		rc.c.closeLocked()
 		rc.c.rc = conn
+		rc.c.boundAddr = addr
+		rc.c.readOnly = readOnly
 		rc.c.mu.Unlock()
 
 		asking = re.Type == "ASK"
-
 		att++
 	}
 	return nil, errors.New("redisc: too many attempts")
@@ -98,4 +121,13 @@ func (rc *retryConn) Receive() (interface{}, error) {
 
 func (rc *retryConn) Flush() error {
 	return errors.New("redisc: unsupported call to Flush")
+}
+
+func isIn(list []string, v string) bool {
+	for _, vv := range list {
+		if v == vv {
+			return true
+		}
+	}
+	return false
 }
