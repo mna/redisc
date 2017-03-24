@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/PuerkitoBio/redisc/redistest"
-	"github.com/PuerkitoBio/redisc/redistest/resp"
 	"github.com/garyburd/redigo/redis"
+	"github.com/mna/redisc/redistest"
+	"github.com/mna/redisc/redistest/resp"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

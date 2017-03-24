@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/PuerkitoBio/redisc"
 	"github.com/garyburd/redigo/redis"
+	"github.com/mna/redisc"
 )
 
 var (

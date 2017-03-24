@@ -1,10 +1,10 @@
-# redisc [![GoDoc](https://godoc.org/github.com/PuerkitoBio/redisc?status.png)][godoc] [![Build Status](https://semaphoreci.com/api/v1/mna/redisc/branches/master/badge.svg)](https://semaphoreci.com/mna/redisc)
+# redisc [![GoDoc](https://godoc.org/github.com/mna/redisc?status.png)][godoc] [![Build Status](https://semaphoreci.com/api/v1/mna/redisc/branches/master/badge.svg)](https://semaphoreci.com/mna/redisc)
 
 Package redisc implements a redis cluster client built on top of the [redigo package][redigo]. See the [godoc][] for details.
 
 ## Installation
 
-    $ go get [-u] [-t] github.com/PuerkitoBio/redisc
+    $ go get [-u] [-t] github.com/mna/redisc
 
 ## Documentation
 
@@ -36,7 +36,7 @@ The main features are:
 The [BSD 3-Clause license][bsd].
 
 [bsd]: http://opensource.org/licenses/BSD-3-Clause
-[godoc]: http://godoc.org/github.com/PuerkitoBio/redisc
+[godoc]: http://godoc.org/github.com/mna/redisc
 [redigo]: https://github.com/garyburd/redigo
 [rgc]: https://github.com/chasex/redis-go-cluster
 [radix1]: https://github.com/fzzy/radix

@@ -5,8 +5,8 @@ import (
 	"log"
 	"time"
 
-	"github.com/PuerkitoBio/redisc"
 	"github.com/garyburd/redigo/redis"
+	"github.com/mna/redisc"
 )
 
 // Create and use a cluster.
