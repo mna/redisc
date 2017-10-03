@@ -33,7 +33,7 @@ type Cluster struct {
 	// pool is used to manage the connections returned by Get.
 	CreatePool func(address string, options ...redis.DialOption) (*redis.Pool, error)
 
-	mu         sync.Mutex             // protects following fields
+	mu         sync.RWMutex           // protects following fields
 	err        error                  // broken connection error
 	pools      map[string]*redis.Pool // created pools per node
 	masters    map[string]bool        // set of known active master nodes, kept up-to-date
@@ -390,4 +390,27 @@ func (c *Cluster) Close() error {
 	c.mu.Unlock()
 
 	return err
+}
+
+// PoolStats contains pool statistics
+type PoolStats struct {
+	ActiveCount int
+	IdleCount   int
+}
+
+// Stats returns stats for all pools
+func (c *Cluster) Stats() map[string]PoolStats {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	stats := make(map[string]PoolStats, len(c.pools))
+
+	for address, pool := range c.pools {
+		stats[address] = PoolStats{
+			ActiveCount: pool.ActiveCount(),
+			IdleCount:   pool.IdleCount(),
+		}
+	}
+
+	return stats
 }
