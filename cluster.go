@@ -392,24 +392,15 @@ func (c *Cluster) Close() error {
 	return err
 }
 
-// PoolStats contains pool statistics
-type PoolStats struct {
-	ActiveCount int
-	IdleCount   int
-}
-
-// Stats returns stats for all pools
-func (c *Cluster) Stats() map[string]PoolStats {
+// Stats returns the current statistics for all pools.
+func (c *Cluster) Stats() map[string]redis.PoolStats {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	stats := make(map[string]PoolStats, len(c.pools))
+	stats := make(map[string]redis.PoolStats, len(c.pools))
 
 	for address, pool := range c.pools {
-		stats[address] = PoolStats{
-			ActiveCount: pool.ActiveCount(),
-			IdleCount:   pool.IdleCount(),
-		}
+		stats[address] = pool.Stats()
 	}
 
 	return stats
