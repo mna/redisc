@@ -392,7 +392,7 @@ func (c *Cluster) Close() error {
 	return err
 }
 
-// Stats returns the current statistics for all pools.
+// Stats returns the current statistics for all pools. Keys are node's addresses.
 func (c *Cluster) Stats() map[string]redis.PoolStats {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
