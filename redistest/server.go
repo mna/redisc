@@ -197,8 +197,12 @@ func getClusterNodeIDs(t *testing.T, ports ...string) map[string]string {
 	s := bufio.NewScanner(strings.NewReader(nodes))
 	for s.Scan() {
 		fields := strings.Fields(s.Text())
+		addrField := fields[1]
+		if ix := strings.Index(addrField, "@"); ix >= 0 {
+			addrField = addrField[:ix]
+		}
 		for _, port := range ports {
-			if fields[1] == "127.0.0.1:"+port {
+			if addrField == "127.0.0.1:"+port {
 				mapping[port] = fields[0]
 				break
 			}
