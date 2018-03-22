@@ -4,7 +4,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/garyburd/redigo/redis"
+	"github.com/gomodule/redigo/redis"
 )
 
 // RetryConn wraps the connection c (which must be a *Conn)

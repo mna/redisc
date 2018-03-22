@@ -5,7 +5,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/garyburd/redigo/redis"
+	"github.com/gomodule/redigo/redis"
 	"github.com/mna/redisc"
 )
 
