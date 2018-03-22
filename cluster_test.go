@@ -284,8 +284,8 @@ func TestCommands(t *testing.T) {
 			{"SISMEMBER", redis.Args{"t1", "a"}, int64(1), ""},
 			{"SMEMBERS", redis.Args{"t1"}, lenResult(2), ""}, // order is not deterministic
 			{"SMOVE", redis.Args{"t1", "{t1}.c", "a"}, int64(1), ""},
-			{"SPOP", redis.Args{"t2"}, nil, ""},
-			{"SRANDMEMBER", redis.Args{"t2"}, nil, ""},
+			{"SPOP", redis.Args{"t3"}, nil, ""},
+			{"SRANDMEMBER", redis.Args{"t3"}, nil, ""},
 			{"SREM", redis.Args{"t1", "b"}, int64(1), ""},
 			{"SSCAN", redis.Args{"{t1}.b", 0}, lenResult(2), ""},
 			{"SUNION", redis.Args{"{t1}.b", "{t1}.c"}, lenResult(3), ""},
