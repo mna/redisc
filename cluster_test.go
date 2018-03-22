@@ -409,7 +409,7 @@ loop:
 
 		v := psc.Receive()
 		switch v := v.(type) {
-		case redis.PMessage:
+		case redis.Message:
 			if !assert.Equal(t, []byte("a"), v.Data, "Received value") {
 				t.Logf("%T", v)
 			}
