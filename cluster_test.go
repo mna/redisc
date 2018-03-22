@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/garyburd/redigo/redis"
+	"github.com/gomodule/redigo/redis"
 	"github.com/mna/redisc/redistest"
 	"github.com/mna/redisc/redistest/resp"
 	"github.com/stretchr/testify/assert"
@@ -409,7 +409,7 @@ loop:
 
 		v := psc.Receive()
 		switch v := v.(type) {
-		case redis.PMessage:
+		case redis.Message:
 			if !assert.Equal(t, []byte("a"), v.Data, "Received value") {
 				t.Logf("%T", v)
 			}

@@ -6,6 +6,12 @@ Package redisc implements a redis cluster client built on top of the [redigo pac
 
     $ go get [-u] [-t] github.com/mna/redisc
 
+## Releases
+
+* **v1.0.0** : This release builds with the `github.com/garyburd/redigo` package, which - according to its [readme][oldredigo] - will not be maintained anymore, having moved to [`github.com/gomodule/redigo`][redigo] for future development. As such, `redisc` will not be updated with the old redigo package, this version was created only to avoid causing issues to users of redisc.
+
+* **v1.1.0** : This release builds with the `github.com/gomodule/redigo` package (the new import path of `redigo`, which also has a breaking change in its `v2.0.0`, the `PMessage` type has been removed and consolidated into `Message`).
+
 ## Documentation
 
 The [godoc][] is the canonical source for documentation.
@@ -31,13 +37,29 @@ The main features are:
 * [radix v1][radix1] provides a cluster package.
 * [radix v2][radix2] provides a cluster package.
 
+## Support
+
+There are a number of ways you can support the project:
+
+* Use it, star it, build something with it, spread the word!
+* Raise issues to improve the project (note: doc typos and clarifications are issues too!)
+  - Please search existing issues before opening a new one - it may have already been adressed.
+* Pull requests: please discuss new code in an issue first, unless the fix is really trivial.
+  - Make sure new code is tested.
+  - Be mindful of existing code - PRs that break existing code have a high probability of being declined, unless it fixes a serious issue.
+
+If you desperately want to send money my way, I have a BuyMeACoffee.com page:
+
+<a href="https://www.buymeacoffee.com/mna" target="_blank"><img src="https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png" alt="Buy Me A Coffee" style="height: 41px !important;width: 174px !important;box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;-webkit-box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;" ></a>
+
 ## License
 
 The [BSD 3-Clause license][bsd].
 
 [bsd]: http://opensource.org/licenses/BSD-3-Clause
 [godoc]: http://godoc.org/github.com/mna/redisc
-[redigo]: https://github.com/garyburd/redigo
+[redigo]: https://github.com/gomodule/redigo
+[oldredigo]: https://github.com/garyburd/redigo
 [rgc]: https://github.com/chasex/redis-go-cluster
 [radix1]: https://github.com/fzzy/radix
 [radix2]: https://github.com/mediocregopher/radix.v2
