@@ -26,6 +26,33 @@ func TestClusterRefreshNormalServer(t *testing.T) {
 	}
 }
 
+func assertMapping(t *testing.T, mapping [hashSlots][]string, masterPorts, replicaPorts []string) {
+	var prev string
+	pix := -1
+	expectedMappingNodes := 1 // at least a master node
+	if len(replicaPorts) > 0 {
+		// if there are replicase, then we expected 2 mapping nodes (master+replica)
+		expectedMappingNodes = 2
+	}
+	for ix, maps := range mapping {
+		if assert.Equal(t, expectedMappingNodes, len(maps), "Mapping has %d node(s)", expectedMappingNodes) {
+			if maps[0] != prev || ix == len(mapping)-1 {
+				prev = maps[0]
+				t.Logf("%5d: %s\n", ix, maps[0])
+				pix++
+			}
+			if assert.NotEmpty(t, maps[0]) {
+				split := strings.Index(maps[0], ":")
+				assert.Contains(t, masterPorts, maps[0][split+1:], "expected master")
+			}
+			if len(maps) > 1 && assert.NotEmpty(t, maps[1]) {
+				split := strings.Index(maps[1], ":")
+				assert.Contains(t, replicaPorts, maps[1][split+1:], "expected replica")
+			}
+		}
+	}
+}
+
 func TestClusterRefresh(t *testing.T) {
 	fn, ports := redistest.StartCluster(t, nil)
 	defer fn()
@@ -36,21 +63,20 @@ func TestClusterRefresh(t *testing.T) {
 
 	err := c.Refresh()
 	if assert.NoError(t, err, "Refresh") {
-		var prev string
-		pix := -1
-		for ix, master := range c.mapping {
-			if assert.Equal(t, 1, len(master), "Mapping has 1 master node") {
-				if master[0] != prev || ix == len(c.mapping)-1 {
-					prev = master[0]
-					t.Logf("%5d: %s\n", ix, master[0])
-					pix++
-				}
-				if assert.NotEmpty(t, master[0]) {
-					split := strings.Index(master[0], ":")
-					assert.Contains(t, ports, master[0][split+1:], "expected master")
-				}
-			}
-		}
+		assertMapping(t, c.mapping, ports, nil)
+	}
+}
+
+func TestClusterRefreshStartWithReplica(t *testing.T) {
+	fn, ports := redistest.StartClusterWithReplicas(t, nil)
+	defer fn()
+
+	c := &Cluster{
+		StartupNodes: []string{":" + ports[len(ports)-1]}, // last port is a replica
+	}
+	err := c.Refresh()
+	if assert.NoError(t, err, "Refresh") {
+		assertMapping(t, c.mapping, ports[:redistest.NumClusterNodes], ports[redistest.NumClusterNodes:])
 	}
 }
 
