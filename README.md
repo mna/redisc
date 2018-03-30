@@ -8,7 +8,9 @@ Package redisc implements a redis cluster client built on top of the [redigo pac
 
 ## Releases
 
-* **v1.1.1** : Remove mention that `StartupNodes` in `Cluster` struct needs to be master nodes (it can be replicas). Add supporting test.
+* **v1.1.2** : Remove mention that `StartupNodes` in `Cluster` struct needs to be master nodes (it can be replicas). Add supporting test.
+
+* **v1.1.1** : Fix CI tests.
 
 * **v1.1.0** : This release builds with the `github.com/gomodule/redigo` package (the new import path of `redigo`, which also has a breaking change in its `v2.0.0`, the `PMessage` type has been removed and consolidated into `Message`).
 
