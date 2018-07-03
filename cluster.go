@@ -373,6 +373,38 @@ func (c *Cluster) Get() redis.Conn {
 	}
 }
 
+// GetForAddr returns a redis.Conn interface that can be used to call
+// redis commands on a specific node in the cluster reachable at addr.
+// The application must close the returned connection. The actual
+// returned type is *Conn, see its documentation for details.
+// It will return an error when the addr is not known in the cluster
+func (c *Cluster) GetForAddr(addr string) (redis.Conn, error) {
+	var exists bool
+
+	addrs := c.getNodeAddrs(false)
+	for _, naddr := range addrs {
+		if addr == naddr {
+			exists = true
+			break
+		}
+	}
+
+	if !exists {
+		return nil, errors.New("redisc: addr not known in the cluster")
+	}
+	return c.getConnForAddr(addr, true)
+}
+
+// Addrs gets all the discovered node addresses in the cluster. Used
+//  for more finegrained control over the cluster nodes. E.g execute a
+//  SCAN command over all the nodes.
+//
+// NOTE: This is a cached view of the cluster. Refresh can be called to
+//       get an actual state of the cluster.
+func (c *Cluster) Addrs() []string {
+	return c.getNodeAddrs(false)
+}
+
 // Close releases the resources used by the cluster. It closes all the
 // pools that were created, if any.
 func (c *Cluster) Close() error {
