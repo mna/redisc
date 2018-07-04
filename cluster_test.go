@@ -31,7 +31,7 @@ func assertMapping(t *testing.T, mapping [hashSlots][]string, masterPorts, repli
 	pix := -1
 	expectedMappingNodes := 1 // at least a master node
 	if len(replicaPorts) > 0 {
-		// if there are replicase, then we expected 2 mapping nodes (master+replica)
+		// if there are replicas, then we expected 2 mapping nodes (master+replica)
 		expectedMappingNodes = 2
 	}
 	for ix, maps := range mapping {
@@ -51,6 +51,20 @@ func assertMapping(t *testing.T, mapping [hashSlots][]string, masterPorts, repli
 			}
 		}
 	}
+}
+
+func assertAddrs(t *testing.T, addrs []string, masters map[string]bool, replicas map[string]bool) {
+	var nodes []string
+
+	for master, _ := range masters {
+		nodes = append(nodes, master)
+	}
+	for replica, _ := range replicas {
+		nodes = append(nodes, replica)
+	}
+
+	assert.Len(t, addrs, len(nodes))
+	// TODO assert slices equal
 }
 
 func TestClusterRefresh(t *testing.T) {
@@ -93,6 +107,28 @@ func TestClusterRefreshAllFail(t *testing.T) {
 		assert.Contains(t, err.Error(), "all nodes failed", "expected message")
 	}
 	require.NoError(t, c.Close(), "Close")
+}
+
+func TestAddrsAfterRefresh(t *testing.T) {
+	fn, ports := redistest.StartCluster(t, nil)
+	defer fn()
+
+	c := &Cluster{
+		StartupNodes: []string{":" + ports[0]},
+	}
+
+	err := c.Refresh()
+	if assert.NoError(t, err, "Refresh") {
+		assertMapping(t, c.mapping, ports, nil)
+	}
+
+	// check without replicas
+	addrs := c.Addrs()
+	assertAddrs(t, addrs, c.masters, nil)
+
+	// check with replicas
+	addrs = c.Addrs(true)
+	assertAddrs(t, addrs, c.masters, c.replicas)
 }
 
 func TestClusterNoNode(t *testing.T) {

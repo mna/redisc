@@ -401,8 +401,14 @@ func (c *Cluster) GetForAddr(addr string) (redis.Conn, error) {
 //
 // NOTE: This is a cached view of the cluster. Refresh can be called to
 //       get an actual state of the cluster.
-func (c *Cluster) Addrs() []string {
-	return c.getNodeAddrs(false)
+func (c *Cluster) Addrs(withReplicas ...bool) []string {
+	var preferReplicas bool
+
+	if len(withReplicas) > 0 {
+		preferReplicas = withReplicas[0]
+	}
+
+	return c.getNodeAddrs(preferReplicas)
 }
 
 // Close releases the resources used by the cluster. It closes all the
