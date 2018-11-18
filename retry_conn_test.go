@@ -18,20 +18,31 @@ func TestRetryConnAsk(t *testing.T) {
 	var s *redistest.MockServer
 	var asking int32
 
+	// test a RetryConn that receves an ASK error, but that redirects
+	// to the same address (only to validate that ASKING is properly
+	// sent first).
 	s = redistest.StartMockServer(t, func(cmd string, args ...string) interface{} {
 		switch cmd {
 		case "CLUSTER":
 			addr, port, _ := net.SplitHostPort(s.Addr)
 			nPort, _ := strconv.Atoi(port)
+			// reply that all slots are served by this server
 			return resp.Array{
-				0: resp.Array{0: int64(0), 1: int64(16383), 2: resp.Array{0: addr, 1: int64(nPort)}},
+				0: resp.Array{0: int64(0), 1: int64(hashSlots - 1), 2: resp.Array{0: addr, 1: int64(nPort)}},
 			}
+
 		case "GET":
+			// if asking wasn't sent first, reply with ASK for slot 1234 to
+			// the same current address.
 			if atomic.LoadInt32(&asking) == 0 {
 				return resp.Error("ASK 1234 " + s.Addr)
 			}
+
+			// if asking was sent, reply with OK
 			return "ok"
+
 		case "ASKING":
+			// record that ASKING was sent
 			atomic.AddInt32(&asking, 1)
 			return nil
 		}
@@ -62,6 +73,61 @@ func TestRetryConnAsk(t *testing.T) {
 	v, err := rc.Do("GET", "x")
 	if assert.NoError(t, err, "GET with retry") {
 		assert.Equal(t, []byte("ok"), v, "expected result")
+	}
+}
+
+func TestRetryConnAskDistinctServers(t *testing.T) {
+	var s1, s2 *redistest.MockServer
+	var asking int32
+
+	// all slots are served by server s1, but simulate a migration on a slot
+	// and reply with ASK to s2, and make sure that s2 received the ASKING
+	// and subsequent command.
+	s1 = redistest.StartMockServer(t, func(cmd string, args ...string) interface{} {
+		switch cmd {
+		case "CLUSTER":
+			addr, port, _ := net.SplitHostPort(s1.Addr)
+			nPort, _ := strconv.Atoi(port)
+			// reply that all slots are served by this server
+			return resp.Array{
+				0: resp.Array{0: int64(0), 1: int64(hashSlots - 1), 2: resp.Array{0: addr, 1: int64(nPort)}},
+			}
+		case "GET":
+			// reply with ASK redirection
+			return resp.Error("ASK 1234 " + s2.Addr)
+		}
+		return resp.Error("unexpected command " + cmd)
+	})
+	defer s1.Close()
+
+	s2 = redistest.StartMockServer(t, func(cmd string, args ...string) interface{} {
+		switch cmd {
+		case "GET":
+			return resp.SimpleString("ok")
+		case "ASKING":
+			// record that ASKING was sent
+			atomic.AddInt32(&asking, 1)
+			return nil
+		}
+		return resp.Error("unexpected command " + cmd)
+	})
+	defer s2.Close()
+
+	c := &Cluster{
+		StartupNodes: []string{s1.Addr},
+	}
+	defer c.Close()
+	require.NoError(t, c.Refresh(), "Refresh")
+
+	conn := c.Get()
+	defer conn.Close()
+
+	rc, err := RetryConn(conn, 3, time.Second)
+	require.NoError(t, err, "RetryConn")
+	v, err := rc.Do("GET", "x")
+	if assert.NoError(t, err, "GET with retry") {
+		assert.Equal(t, []byte("ok"), v, "expected result")
+		assert.Equal(t, int32(1), atomic.LoadInt32(&asking))
 	}
 }
 
