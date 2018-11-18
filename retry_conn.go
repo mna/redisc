@@ -82,11 +82,31 @@ func (rc *retryConn) do(cmd string, args ...interface{}) (interface{}, error) {
 			}
 		}
 
-		// forceDial doesn't require locking (immutable)
-		conn, addr, err := cluster.getConnForSlot(re.NewSlot, rc.c.forceDial, readOnly)
-		if err != nil {
-			// could not get connection to that node, return that error
-			return nil, err
+		var conn redis.Conn
+		addr := re.Addr
+		asking = re.Type == "ASK"
+
+		if asking {
+			// if redirecting due to ASK, use the address that was
+			// provided in the ASK error reply.
+			conn, err = cluster.getConnForAddr(addr, rc.c.forceDial)
+			if err != nil {
+				return nil, err
+			}
+			// TODO(mna): does redis cluster send ASK replies that
+			// redirect to replicas if the source node was a replica?
+			// Assume no for now.
+			readOnly = false
+		} else {
+			// if redirecting due to a MOVED, the slot mapping is already
+			// updated to reflect the new server for that slot (done in
+			// rc.c.Do), so getConnForSlot will return a connection to
+			// the correct address.
+			conn, addr, err = cluster.getConnForSlot(re.NewSlot, rc.c.forceDial, readOnly)
+			if err != nil {
+				// could not get connection to that node, return that error
+				return nil, err
+			}
 		}
 
 		rc.c.mu.Lock()
@@ -97,7 +117,6 @@ func (rc *retryConn) do(cmd string, args ...interface{}) (interface{}, error) {
 		rc.c.readOnly = readOnly
 		rc.c.mu.Unlock()
 
-		asking = re.Type == "ASK"
 		att++
 	}
 	return nil, errors.New("redisc: too many attempts")
