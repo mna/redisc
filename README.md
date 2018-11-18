@@ -8,6 +8,8 @@ Package redisc implements a redis cluster client built on top of the [redigo pac
 
 ## Releases
 
+* **v1.1.3** : Fix handling of `ASK` replies in `RetryConn`.
+
 * **v1.1.2** : Remove mention that `StartupNodes` in `Cluster` struct needs to be master nodes (it can be replicas). Add supporting test.
 
 * **v1.1.1** : Fix CI tests.
