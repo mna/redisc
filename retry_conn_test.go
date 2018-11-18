@@ -103,7 +103,7 @@ func TestRetryConnAskDistinctServers(t *testing.T) {
 	s2 = redistest.StartMockServer(t, func(cmd string, args ...string) interface{} {
 		switch cmd {
 		case "GET":
-			return resp.SimpleString("ok")
+			return "ok"
 		case "ASKING":
 			// record that ASKING was sent
 			atomic.AddInt32(&asking, 1)
