@@ -50,6 +50,7 @@ type Conn struct {
 	boundAddr string
 	err       error
 	rc        redis.Conn
+	ctx       context
 }
 
 // RedirError is a cluster redirection error. It indicates that
@@ -128,7 +129,7 @@ func (c *Conn) bind(slot int) (rc redis.Conn, ok bool, err error) {
 	rc, err = c.rc, c.err
 	if err == nil {
 		if rc == nil {
-			conn, addr, err2 := c.cluster.getConn(slot, c.forceDial, c.readOnly)
+			conn, addr, err2 := c.cluster.getConn(c.ctx, slot, c.forceDial, c.readOnly)
 			if err2 != nil {
 				err = err2
 			} else {

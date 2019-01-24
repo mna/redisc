@@ -12,6 +12,14 @@ import (
 
 const hashSlots = 16384
 
+// interface compatible with Go 1.7+ context.Context.
+type context interface {
+	Deadline() (time.Time, bool)
+	Done() <-chan struct{}
+	Err() error
+	Value(interface{}) interface{}
+}
+
 // Cluster manages a redis cluster. If the CreatePool field is not nil,
 // a redis.Pool is used for each node in the cluster to get connections
 // via Get. If it is nil or if Dial is called, redis.Dial
@@ -154,7 +162,7 @@ type slotMapping struct {
 }
 
 func (c *Cluster) getClusterSlots(addr string) ([]slotMapping, error) {
-	conn, err := c.getConnForAddr(addr, false)
+	conn, err := c.getConnForAddr(nil, addr, false)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +210,7 @@ func (c *Cluster) getClusterSlots(addr string) ([]slotMapping, error) {
 	return m, nil
 }
 
-func (c *Cluster) getConnForAddr(addr string, forceDial bool) (redis.Conn, error) {
+func (c *Cluster) getConnForAddr(ctx context, addr string, forceDial bool) (redis.Conn, error) {
 	// non-pooled doesn't require a lock
 	if c.CreatePool == nil || forceDial {
 		return redis.Dial("tcp", addr, c.DialOptions...)
@@ -234,14 +242,12 @@ func (c *Cluster) getConnForAddr(addr string, forceDial bool) (redis.Conn, error
 		}
 	}
 	c.mu.Unlock()
-
-	conn := p.Get()
-	return conn, conn.Err()
+	return poolGet(ctx, p)
 }
 
 var errNoNodeForSlot = errors.New("redisc: no node for slot")
 
-func (c *Cluster) getConnForSlot(slot int, forceDial, readOnly bool) (redis.Conn, string, error) {
+func (c *Cluster) getConnForSlot(ctx context, slot int, forceDial, readOnly bool) (redis.Conn, string, error) {
 	c.mu.Lock()
 	addrs := c.mapping[slot]
 	c.mu.Unlock()
@@ -265,7 +271,7 @@ func (c *Cluster) getConnForSlot(slot int, forceDial, readOnly bool) (redis.Conn
 	} else {
 		readOnly = false
 	}
-	conn, err := c.getConnForAddr(addr, forceDial)
+	conn, err := c.getConnForAddr(ctx, addr, forceDial)
 	if err == nil && readOnly {
 		conn.Do("READONLY")
 	}
@@ -278,7 +284,7 @@ var rnd = struct {
 	*rand.Rand
 }{Rand: rand.New(rand.NewSource(time.Now().UnixNano()))}
 
-func (c *Cluster) getRandomConn(forceDial, readOnly bool) (redis.Conn, string, error) {
+func (c *Cluster) getRandomConn(ctx context, forceDial, readOnly bool) (redis.Conn, string, error) {
 	addrs := c.getNodeAddrs(readOnly)
 	rnd.Lock()
 	perms := rnd.Perm(len(addrs))
@@ -286,7 +292,7 @@ func (c *Cluster) getRandomConn(forceDial, readOnly bool) (redis.Conn, string, e
 
 	for _, ix := range perms {
 		addr := addrs[ix]
-		conn, err := c.getConnForAddr(addr, forceDial)
+		conn, err := c.getConnForAddr(ctx, addr, forceDial)
 		if err == nil {
 			if readOnly {
 				conn.Do("READONLY")
@@ -297,15 +303,15 @@ func (c *Cluster) getRandomConn(forceDial, readOnly bool) (redis.Conn, string, e
 	return nil, "", errors.New("redisc: failed to get a connection")
 }
 
-func (c *Cluster) getConn(preferredSlot int, forceDial, readOnly bool) (conn redis.Conn, addr string, err error) {
+func (c *Cluster) getConn(ctx context, preferredSlot int, forceDial, readOnly bool) (conn redis.Conn, addr string, err error) {
 	if preferredSlot >= 0 {
-		conn, addr, err = c.getConnForSlot(preferredSlot, forceDial, readOnly)
+		conn, addr, err = c.getConnForSlot(ctx, preferredSlot, forceDial, readOnly)
 		if err == errNoNodeForSlot {
 			c.needsRefresh(nil)
 		}
 	}
 	if preferredSlot < 0 || err != nil {
-		conn, addr, err = c.getRandomConn(forceDial, readOnly)
+		conn, addr, err = c.getRandomConn(ctx, forceDial, readOnly)
 	}
 	return conn, addr, err
 }

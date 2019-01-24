@@ -89,7 +89,7 @@ func (rc *retryConn) do(cmd string, args ...interface{}) (interface{}, error) {
 		if asking {
 			// if redirecting due to ASK, use the address that was
 			// provided in the ASK error reply.
-			conn, err = cluster.getConnForAddr(addr, rc.c.forceDial)
+			conn, err = cluster.getConnForAddr(nil, addr, rc.c.forceDial)
 			if err != nil {
 				return nil, err
 			}
@@ -102,7 +102,7 @@ func (rc *retryConn) do(cmd string, args ...interface{}) (interface{}, error) {
 			// updated to reflect the new server for that slot (done in
 			// rc.c.Do), so getConnForSlot will return a connection to
 			// the correct address.
-			conn, addr, err = cluster.getConnForSlot(re.NewSlot, rc.c.forceDial, readOnly)
+			conn, addr, err = cluster.getConnForSlot(nil, re.NewSlot, rc.c.forceDial, readOnly)
 			if err != nil {
 				// could not get connection to that node, return that error
 				return nil, err
@@ -115,6 +115,7 @@ func (rc *retryConn) do(cmd string, args ...interface{}) (interface{}, error) {
 		rc.c.rc = conn
 		rc.c.boundAddr = addr
 		rc.c.readOnly = readOnly
+		rc.c.ctx = nil // always removed on an automatic redirection - only used to get the initial conn
 		rc.c.mu.Unlock()
 
 		att++
