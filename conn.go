@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/gomodule/redigo/redis"
 )
@@ -232,19 +233,30 @@ func (c *Conn) ReadOnly() error {
 // If the connection is not yet bound to a cluster node, it will be
 // after this call, based on the rules documented in the Conn type.
 func (c *Conn) Do(cmd string, args ...interface{}) (interface{}, error) {
+	return c.DoWithTimeout(-1, cmd, args...)
+}
+
+// Do sends a command to the server and returns the received reply.
+// The timeout overrides the write timeout set when dialing the
+// connection.
+func (c *Conn) DoWithTimeout(timeout time.Duration, cmd string, args ...interface{}) (v interface{}, err error) {
 	rc, _, err := c.bind(cmdSlot(cmd, args))
 	if err != nil {
 		return nil, err
 	}
-	v, err := rc.Do(cmd, args...)
-
+	if timeout < 0 {
+		v, err = rc.Do(cmd, args...)
+	} else if rcwt, ok := rc.(redis.ConnWithTimeout); ok {
+		v, err = rcwt.DoWithTimeout(timeout, cmd, args...)
+	} else {
+		return nil, errors.New("redis: connection does not support ConnWithTimeout")
+	}
 	// handle redirections, if any
 	if re := ParseRedir(err); re != nil {
 		if re.Type == "MOVED" {
 			c.cluster.needsRefresh(re)
 		}
 	}
-
 	return v, err
 }
 
@@ -263,19 +275,29 @@ func (c *Conn) Send(cmd string, args ...interface{}) error {
 // is not yet bound to a cluster node, it will be after this call,
 // based on the rules documented in the Conn type.
 func (c *Conn) Receive() (interface{}, error) {
+	return c.ReceiveWithTimeout(-1)
+}
+
+// Receive receives a single reply from the Redis server. The timeout
+// overrides the read timeout set when dialing the connection.
+func (c *Conn) ReceiveWithTimeout(timeout time.Duration) (v interface{}, err error) {
 	rc, _, err := c.bind(-1)
 	if err != nil {
 		return nil, err
 	}
-	v, err := rc.Receive()
-
+	if timeout < 0 {
+		v, err = rc.Receive()
+	} else if rcwt, ok := rc.(redis.ConnWithTimeout); ok {
+		v, err = rcwt.ReceiveWithTimeout(timeout)
+	} else {
+		return nil, errors.New("redis: connection does not support ConnWithTimeout")
+	}
 	// handle redirections, if any
 	if re := ParseRedir(err); re != nil {
 		if re.Type == "MOVED" {
 			c.cluster.needsRefresh(re)
 		}
 	}
-
 	return v, err
 }
 
