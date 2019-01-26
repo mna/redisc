@@ -249,7 +249,7 @@ func (c *Conn) DoWithTimeout(timeout time.Duration, cmd string, args ...interfac
 	} else if rcwt, ok := rc.(redis.ConnWithTimeout); ok {
 		v, err = rcwt.DoWithTimeout(timeout, cmd, args...)
 	} else {
-		return nil, errors.New("redis: connection does not support ConnWithTimeout")
+		return nil, errors.New("redisc: connection does not support ConnWithTimeout")
 	}
 	// handle redirections, if any
 	if re := ParseRedir(err); re != nil {
@@ -290,7 +290,7 @@ func (c *Conn) ReceiveWithTimeout(timeout time.Duration) (v interface{}, err err
 	} else if rcwt, ok := rc.(redis.ConnWithTimeout); ok {
 		v, err = rcwt.ReceiveWithTimeout(timeout)
 	} else {
-		return nil, errors.New("redis: connection does not support ConnWithTimeout")
+		return nil, errors.New("redisc: connection does not support ConnWithTimeout")
 	}
 	// handle redirections, if any
 	if re := ParseRedir(err); re != nil {
