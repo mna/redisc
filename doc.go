@@ -18,7 +18,8 @@
 // for a redis.Pool from the redigo package.
 //
 // Similarly, the Conn type implements redigo's redis.Conn
-// interface, so the API to execute commands is the same -
+// interface (and the augmented redis.ConnWithTimeout one too),
+// so the API to execute commands is the same -
 // in fact the redisc package uses the redigo package as its
 // only third-party dependency.
 //
@@ -83,7 +84,8 @@
 // Connection
 //
 // The connection returned from Get or Dial is a redigo redis.Conn
-// interface, with a concrete type of *Conn. In addition to the
+// interface (that also implements redis.ConnWithTimeout),
+// with a concrete type of *Conn. In addition to the
 // interface's required methods, *Conn adds the following methods:
 //
 //     Bind(...string) error

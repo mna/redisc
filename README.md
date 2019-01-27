@@ -8,6 +8,8 @@ Package redisc implements a redis cluster client built on top of the [redigo pac
 
 ## Releases
 
+* **v1.1.4** : Add `Conn.DoWithTimeout` and `Conn.ReceiveWithTimeout` to match redigo's `ConnWithTimeout` interface (thanks to [@letsfire][letsfire]).
+
 * **v1.1.3** : Fix handling of `ASK` replies in `RetryConn`.
 
 * **v1.1.2** : Remove mention that `StartupNodes` in `Cluster` struct needs to be master nodes (it can be replicas). Add supporting test.
@@ -69,4 +71,4 @@ The [BSD 3-Clause license][bsd].
 [rgc]: https://github.com/chasex/redis-go-cluster
 [radix1]: https://github.com/fzzy/radix
 [radix2]: https://github.com/mediocregopher/radix.v2
-
+[letsfire]: https://github.com/letsfire
