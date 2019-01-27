@@ -253,6 +253,49 @@ func TestConnBind(t *testing.T) {
 	assert.NoError(t, BindConn(conn2), "Bind without key")
 }
 
+func TestConnWithTimeout(t *testing.T) {
+	fn, ports := redistest.StartCluster(t, nil)
+	defer fn()
+
+	c := &Cluster{
+		StartupNodes: []string{":" + ports[0]},
+		DialOptions: []redis.DialOption{
+			redis.DialReadTimeout(time.Second),
+		},
+	}
+	require.NoError(t, c.Refresh(), "Refresh")
+
+	conn1 := c.Get().(*Conn)
+	defer conn1.Close()
+
+	_, err1 := conn1.Do("BLPOP", "x", 2)
+	assert.Error(t, err1, "Do")
+
+	conn2 := c.Get().(*Conn)
+	defer conn2.Close()
+
+	v2, err2 := conn2.DoWithTimeout(time.Second*3, "BLPOP", "x", 2)
+	assert.NoError(t, err2, "DoWithTimeout")
+	assert.Equal(t, nil, v2, "expected result")
+
+	conn3 := c.Get().(*Conn)
+	defer conn3.Close()
+
+	conn3.Send("BLPOP", "x", 2)
+	conn3.Flush()
+	_, err3 := conn3.Receive()
+	assert.Error(t, err3, "Receive")
+
+	conn4 := c.Get().(*Conn)
+	defer conn4.Close()
+
+	conn4.Send("BLPOP", "x", 2)
+	conn4.Flush()
+	v4, err4 := conn4.ReceiveWithTimeout(time.Second * 3)
+	assert.NoError(t, err4, "ReceiveWithTimeout")
+	assert.Equal(t, nil, v4, "expected result")
+}
+
 func TestConnClose(t *testing.T) {
 	c := &Cluster{
 		StartupNodes: []string{":6379"},
