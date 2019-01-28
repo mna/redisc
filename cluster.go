@@ -32,6 +32,11 @@ type Cluster struct {
 	// pool is used to manage the connections returned by Get.
 	CreatePool func(address string, options ...redis.DialOption) (*redis.Pool, error)
 
+	// PoolWaitTime is time to wait when getting connection from the pool and the pool is full.
+	// If 0, it doesn't wait and simply return with invalid connection.
+	// Pool.Wait must be se to true to make it work.
+	PoolWaitTime time.Duration
+
 	mu         sync.RWMutex           // protects following fields
 	err        error                  // broken connection error
 	pools      map[string]*redis.Pool // created pools per node
@@ -235,8 +240,7 @@ func (c *Cluster) getConnForAddr(addr string, forceDial bool) (redis.Conn, error
 	}
 	c.mu.Unlock()
 
-	conn := p.Get()
-	return conn, conn.Err()
+	return c.getFromPool(p)
 }
 
 var errNoNodeForSlot = errors.New("redisc: no node for slot")
