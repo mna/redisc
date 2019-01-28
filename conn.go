@@ -11,7 +11,7 @@ import (
 	"github.com/gomodule/redigo/redis"
 )
 
-var _ redis.Conn = (*Conn)(nil)
+var _ redis.ConnWithTimeout = (*Conn)(nil)
 
 // Conn is a redis cluster connection. When returned by Get
 // or Dial, it is not yet bound to any node in the cluster.
@@ -236,9 +236,12 @@ func (c *Conn) Do(cmd string, args ...interface{}) (interface{}, error) {
 	return c.DoWithTimeout(-1, cmd, args...)
 }
 
-// Do sends a command to the server and returns the received reply.
-// The timeout overrides the write timeout set when dialing the
-// connection.
+// DoWithTimeout sends a command to the server and returns the received reply.
+// If the connection is not yet bound to a cluster node, it will be
+// after this call, based on the rules documented in the Conn type.
+//
+// The timeout overrides the read timeout set when dialing the
+// connection (in the DialOptions of the Cluster).
 func (c *Conn) DoWithTimeout(timeout time.Duration, cmd string, args ...interface{}) (v interface{}, err error) {
 	rc, _, err := c.bind(cmdSlot(cmd, args))
 	if err != nil {
@@ -278,8 +281,12 @@ func (c *Conn) Receive() (interface{}, error) {
 	return c.ReceiveWithTimeout(-1)
 }
 
-// Receive receives a single reply from the Redis server. The timeout
-// overrides the read timeout set when dialing the connection.
+// ReceiveWithTimeout receives a single reply from the Redis server.
+// If the connection is not yet bound to a cluster node, it will be
+// after this call, based on the rules documented in the Conn type.
+//
+// The timeout overrides the read timeout set when dialing the
+// connection (in the DialOptions of the Cluster).
 func (c *Conn) ReceiveWithTimeout(timeout time.Duration) (v interface{}, err error) {
 	rc, _, err := c.bind(-1)
 	if err != nil {

@@ -2,6 +2,7 @@ package redisc
 
 import (
 	"io"
+	"net"
 	"strings"
 	"testing"
 	"time"
@@ -260,40 +261,63 @@ func TestConnWithTimeout(t *testing.T) {
 	c := &Cluster{
 		StartupNodes: []string{":" + ports[0]},
 		DialOptions: []redis.DialOption{
+			redis.DialConnectTimeout(2 * time.Second),
 			redis.DialReadTimeout(time.Second),
 		},
 	}
 	require.NoError(t, c.Refresh(), "Refresh")
 
+	testConnDoWithTimeout(t, c)
+	testConnReceiveWithTimeout(t, c)
+}
+
+func testConnDoWithTimeout(t *testing.T, c *Cluster) {
 	conn1 := c.Get().(*Conn)
 	defer conn1.Close()
 
+	// Do fails because the default timeout is 1s, but command blocks for 2s
 	_, err1 := conn1.Do("BLPOP", "x", 2)
-	assert.Error(t, err1, "Do")
+	if assert.Error(t, err1, "Do") {
+		if assert.IsType(t, &net.OpError{}, err1) {
+			oe := err1.(*net.OpError)
+			assert.True(t, oe.Timeout(), "is timeout")
+		}
+	}
 
 	conn2 := c.Get().(*Conn)
 	defer conn2.Close()
 
+	// DoWithTimeout succeeds because overrides timeout with 3s.
 	v2, err2 := conn2.DoWithTimeout(time.Second*3, "BLPOP", "x", 2)
 	assert.NoError(t, err2, "DoWithTimeout")
 	assert.Equal(t, nil, v2, "expected result")
+}
 
-	conn3 := c.Get().(*Conn)
-	defer conn3.Close()
+func testConnReceiveWithTimeout(t *testing.T, c *Cluster) {
+	conn1 := c.Get().(*Conn)
+	defer conn1.Close()
 
-	conn3.Send("BLPOP", "x", 2)
-	conn3.Flush()
-	_, err3 := conn3.Receive()
-	assert.Error(t, err3, "Receive")
+	assert.NoError(t, conn1.Send("BLPOP", "x", 2), "Send")
+	assert.NoError(t, conn1.Flush(), "Flush")
 
-	conn4 := c.Get().(*Conn)
-	defer conn4.Close()
+	// Receive fails with its default timeout of 1s vs Block command for 2s
+	_, err1 := conn1.Receive()
+	if assert.Error(t, err1, "Receive") {
+		if assert.IsType(t, &net.OpError{}, err1) {
+			oe := err1.(*net.OpError)
+			assert.True(t, oe.Timeout(), "is timeout")
+		}
+	}
 
-	conn4.Send("BLPOP", "x", 2)
-	conn4.Flush()
-	v4, err4 := conn4.ReceiveWithTimeout(time.Second * 3)
-	assert.NoError(t, err4, "ReceiveWithTimeout")
-	assert.Equal(t, nil, v4, "expected result")
+	conn2 := c.Get().(*Conn)
+	defer conn2.Close()
+
+	// ReceiveWithTimeout succeeds with timeout of 3s vs Block command for 2s
+	assert.NoError(t, conn2.Send("BLPOP", "x", 2), "Send")
+	assert.NoError(t, conn2.Flush(), "Flush")
+	v2, err2 := conn2.ReceiveWithTimeout(time.Second * 3)
+	assert.NoError(t, err2, "ReceiveWithTimeout")
+	assert.Equal(t, nil, v2, "expected result")
 }
 
 func TestConnClose(t *testing.T) {
