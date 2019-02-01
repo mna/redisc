@@ -8,6 +8,8 @@ Package redisc implements a redis cluster client built on top of the [redigo pac
 
 ## Releases
 
+* **v1.1.5** : Add `Cluster.PoolWaitTime` to configure the time to wait on a connection from a pool with `MaxActive` > 0 and `Wait` set to true (thanks to [@iwanbk][iwanbk]).
+
 * **v1.1.4** : Add `Conn.DoWithTimeout` and `Conn.ReceiveWithTimeout` to match redigo's `ConnWithTimeout` interface (thanks to [@letsfire][letsfire]).
 
 * **v1.1.3** : Fix handling of `ASK` replies in `RetryConn`.
@@ -72,3 +74,4 @@ The [BSD 3-Clause license][bsd].
 [radix1]: https://github.com/fzzy/radix
 [radix2]: https://github.com/mediocregopher/radix.v2
 [letsfire]: https://github.com/letsfire
+[iwanbk]: https://github.com/iwanbk
