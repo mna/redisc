@@ -27,11 +27,11 @@ func TestGetPool(t *testing.T) {
 
 	// fist connection is OK
 	conn, err := c.getFromPool(p)
-	assert.NoError(t, err)
+	if assert.NoError(t, err) {
+		defer conn.Close()
+	}
 
 	// second connection should be failed because we only have 1 MaxActive
 	_, err = c.getFromPool(p)
 	assert.Error(t, err)
-
-	conn.Close()
 }

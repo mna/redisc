@@ -32,9 +32,12 @@ type Cluster struct {
 	// pool is used to manage the connections returned by Get.
 	CreatePool func(address string, options ...redis.DialOption) (*redis.Pool, error)
 
-	// PoolWaitTime is time to wait when getting connection from the pool and the pool is full.
-	// If 0, it doesn't wait and simply return with invalid connection.
-	// Pool.Wait must be se to true to make it work.
+	// PoolWaitTime is the time to wait when getting a connection from
+	// a pool configured with MaxActive > 0 and Wait set to true, and
+	// MaxActive connections are already in use.
+	//
+	// If <= 0 (or with Go < 1.7), there is no wait timeout, it will wait
+	// indefinitely if Pool.Wait is true.
 	PoolWaitTime time.Duration
 
 	mu         sync.RWMutex           // protects following fields

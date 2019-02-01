@@ -3,6 +3,7 @@
 package redisc
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -30,18 +31,22 @@ func TestGetPoolTimedOut(t *testing.T) {
 		PoolWaitTime: 100 * time.Millisecond,
 	}
 	conn, err := c.getFromPool(p)
-	assert.NoError(t, err)
+	if assert.NoError(t, err) {
+		defer conn.Close()
+	}
 
 	// second connection should be failed because we only have 1 MaxActive
+	start := time.Now()
 	_, err = c.getFromPool(p)
-	assert.Error(t, err)
-
-	conn.Close()
+	if assert.Error(t, err) {
+		assert.Equal(t, context.DeadlineExceeded, err)
+		assert.True(t, time.Since(start) >= 100*time.Millisecond)
+	}
 }
 
-// TestGetPoolGotOnFull test that we could get the connection when the pool
+// TestGetPoolWaitOnFull test that we could get the connection when the pool
 // is full and we can wait for it
-func TestGetPoolGotOnFull(t *testing.T) {
+func TestGetPoolWaitOnFull(t *testing.T) {
 	s := redistest.StartMockServer(t, func(cmd string, args ...string) interface{} {
 		return nil
 	})
@@ -68,15 +73,22 @@ func TestGetPoolGotOnFull(t *testing.T) {
 	assert.NoError(t, err)
 
 	// second connection should be failed because we only have 1 MaxActive
+	start := time.Now()
 	_, err = c.getFromPool(p)
-	assert.Error(t, err)
+	if assert.Error(t, err) {
+		assert.Equal(t, context.DeadlineExceeded, err)
+		assert.True(t, time.Since(start) >= waitTime)
+	}
 
 	go func() {
 		time.Sleep(usageTime) // sleep before close, to simulate waiting for connection
 		conn.Close()
 	}()
-	conn2, err := c.getFromPool(p)
-	assert.NoError(t, err)
 
+	start = time.Now()
+	conn2, err := c.getFromPool(p)
+	if assert.NoError(t, err) {
+		assert.True(t, time.Since(start) >= usageTime)
+	}
 	conn2.Close()
 }
