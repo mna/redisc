@@ -8,6 +8,8 @@ Package redisc implements a redis cluster client built on top of the [redigo pac
 
 ## Releases
 
+* **v1.1.6** : Append the actual error messages when a refresh returns "all nodes failed" error.
+
 * **v1.1.5** : Add `Cluster.PoolWaitTime` to configure the time to wait on a connection from a pool with `MaxActive` > 0 and `Wait` set to true (thanks to [@iwanbk][iwanbk]).
 
 * **v1.1.4** : Add `Conn.DoWithTimeout` and `Conn.ReceiveWithTimeout` to match redigo's `ConnWithTimeout` interface (thanks to [@letsfire][letsfire]).

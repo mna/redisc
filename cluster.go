@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math/rand"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -71,56 +72,61 @@ func (c *Cluster) Refresh() error {
 }
 
 func (c *Cluster) refresh() error {
+	var errMsgs []string
+
 	addrs := c.getNodeAddrs(false)
 	for _, addr := range addrs {
 		m, err := c.getClusterSlots(addr)
-		if err == nil {
-			// succeeded, save as mapping
-			c.mu.Lock()
-			// mark all current nodes as false
-			for k := range c.masters {
-				c.masters[k] = false
-			}
-			for k := range c.replicas {
-				c.replicas[k] = false
-			}
-
-			for _, sm := range m {
-				for i, node := range sm.nodes {
-					if node != "" {
-						target := c.masters
-						if i > 0 {
-							target = c.replicas
-						}
-						target[node] = true
-					}
-				}
-				for ix := sm.start; ix <= sm.end; ix++ {
-					c.mapping[ix] = sm.nodes
-				}
-			}
-
-			// remove all nodes that are gone from the cluster
-			for _, nodes := range []map[string]bool{c.masters, c.replicas} {
-				for k, ok := range nodes {
-					if !ok {
-						delete(nodes, k)
-
-						// close and remove all existing pools for removed nodes
-						if p := c.pools[k]; p != nil {
-							p.Close()
-							delete(c.pools, k)
-						}
-					}
-				}
-			}
-
-			// mark that no refresh is needed until another MOVED
-			c.refreshing = false
-			c.mu.Unlock()
-
-			return nil
+		if err != nil {
+			errMsgs = append(errMsgs, err.Error())
+			continue
 		}
+
+		// succeeded, save as mapping
+		c.mu.Lock()
+		// mark all current nodes as false
+		for k := range c.masters {
+			c.masters[k] = false
+		}
+		for k := range c.replicas {
+			c.replicas[k] = false
+		}
+
+		for _, sm := range m {
+			for i, node := range sm.nodes {
+				if node != "" {
+					target := c.masters
+					if i > 0 {
+						target = c.replicas
+					}
+					target[node] = true
+				}
+			}
+			for ix := sm.start; ix <= sm.end; ix++ {
+				c.mapping[ix] = sm.nodes
+			}
+		}
+
+		// remove all nodes that are gone from the cluster
+		for _, nodes := range []map[string]bool{c.masters, c.replicas} {
+			for k, ok := range nodes {
+				if !ok {
+					delete(nodes, k)
+
+					// close and remove all existing pools for removed nodes
+					if p := c.pools[k]; p != nil {
+						p.Close()
+						delete(c.pools, k)
+					}
+				}
+			}
+		}
+
+		// mark that no refresh is needed until another MOVED
+		c.refreshing = false
+		c.mu.Unlock()
+
+		return nil
 	}
 
 	// reset the refreshing flag
@@ -128,7 +134,13 @@ func (c *Cluster) refresh() error {
 	c.refreshing = false
 	c.mu.Unlock()
 
-	return errors.New("redisc: all nodes failed")
+	var sb strings.Builder
+	sb.WriteString("redisc: all nodes failed")
+	for _, msg := range errMsgs {
+		sb.WriteByte('\n')
+		sb.WriteString(msg)
+	}
+	return errors.New(sb.String())
 }
 
 // needsRefresh handles automatic update of the mapping.

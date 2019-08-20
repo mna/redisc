@@ -22,7 +22,8 @@ func TestClusterRefreshNormalServer(t *testing.T) {
 	}
 	err := c.Refresh()
 	if assert.Error(t, err, "Refresh") {
-		assert.Contains(t, err.Error(), "redisc: all nodes failed", "expected error message")
+		assert.Contains(t, err.Error(), "redisc: all nodes failed", "expected redisc error message")
+		assert.Contains(t, err.Error(), "cluster support disabled", "expected redis error message")
 	}
 }
 
@@ -91,6 +92,7 @@ func TestClusterRefreshAllFail(t *testing.T) {
 	}
 	if err := c.Refresh(); assert.Error(t, err, "Refresh") {
 		assert.Contains(t, err.Error(), "all nodes failed", "expected message")
+		assert.Contains(t, err.Error(), "nope", "expected server message")
 	}
 	require.NoError(t, c.Close(), "Close")
 }
@@ -479,7 +481,7 @@ func runScriptCommands(t *testing.T, c *Cluster, wg *sync.WaitGroup) {
 	assert.Equal(t, int64(1), v, "SendHash Script result")
 
 	// do with keys from different slots
-	v, err = script.Do(conn, "scr{a}1", "scr{b}2", "x", "y")
+	_, err = script.Do(conn, "scr{a}1", "scr{b}2", "x", "y")
 	if assert.Error(t, err, "Do script invalid keys") {
 		assert.Contains(t, err.Error(), "CROSSSLOT", "Do script invalid keys")
 	}
