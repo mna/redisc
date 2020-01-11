@@ -254,6 +254,32 @@ func TestConnBind(t *testing.T) {
 	assert.NoError(t, BindConn(conn2), "Bind without key")
 }
 
+func TestConnBlankDo(t *testing.T) {
+	fn, ports := redistest.StartCluster(t, nil)
+	defer fn()
+
+	for i, p := range ports {
+		ports[i] = ":" + p
+	}
+	c := &Cluster{
+		StartupNodes: ports,
+		DialOptions:  []redis.DialOption{redis.DialConnectTimeout(2 * time.Second)},
+	}
+	require.NoError(t, c.Refresh(), "Refresh")
+
+	conn := c.Get()
+	defer conn.Close()
+	cconn := conn.(*Conn)
+
+	_, err := conn.Do("")
+	assert.NoError(t, err)
+	assert.Nil(t, cconn.rc)
+
+	err = BindConn(conn, "A")
+	assert.NoError(t, err, "Bind")
+	assert.NotNil(t, cconn.rc)
+}
+
 func TestConnWithTimeout(t *testing.T) {
 	fn, ports := redistest.StartCluster(t, nil)
 	defer fn()

@@ -243,6 +243,15 @@ func (c *Conn) Do(cmd string, args ...interface{}) (interface{}, error) {
 // The timeout overrides the read timeout set when dialing the
 // connection (in the DialOptions of the Cluster).
 func (c *Conn) DoWithTimeout(timeout time.Duration, cmd string, args ...interface{}) (v interface{}, err error) {
+	// The blank command is a special redigo/redis command that flushes the
+	// output buffer and receives all pending replies. This is used, for example,
+	// when returning a Redis conneciton back to the pool. If we recieve the
+	// blank command, don't bind to a random node if this connection is not bound
+	// yet.
+	if cmd == "" && c.rc == nil {
+		return nil, nil
+	}
+
 	rc, _, err := c.bind(cmdSlot(cmd, args))
 	if err != nil {
 		return nil, err
