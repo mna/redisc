@@ -159,3 +159,49 @@ func ExampleRetryConn() {
 	}
 	fmt.Println("GET returned ", v)
 }
+
+func ExampleCluster_SplitByNode() {
+	// create the cluster
+	cluster := redisc.Cluster{
+		StartupNodes: []string{":7000", ":7001", ":7002"},
+		DialOptions:  []redis.DialOption{redis.DialConnectTimeout(5 * time.Second)},
+		CreatePool:   createPool,
+	}
+	defer cluster.Close()
+
+	// initialize its mapping
+	if err := cluster.Refresh(); err != nil {
+		log.Fatalf("Refresh failed: %v", err)
+	}
+
+	// make some keys
+	keys := []string{}
+	for c := 'a'; c <= 'z'; c++ {
+		keys = append(keys, string(c))
+	}
+
+	// seed the cluster with data
+	for _, key := range keys {
+		conn := cluster.Get()
+		_, err := conn.Do("SET", key, "Hello!")
+		if err != nil {
+			log.Fatalf("SET failed: %v", err)
+		}
+		conn.Close()
+	}
+
+	// split keys for MGET
+	groupedKeys, err := cluster.SplitByNode(keys)
+	if err != nil {
+		log.Fatalf("SplitByNode failed: %v", err)
+	}
+
+	for _, keyGroup := range groupedKeys {
+		conn := cluster.Get()
+		_, err := redis.Strings(conn.Do("MGET", redis.Args{}.Add(keyGroup)...))
+		if err != nil {
+			log.Fatalf("MGET failed: %v", err)
+		}
+		conn.Close()
+	}
+}

@@ -2,6 +2,7 @@ package redisc
 
 import (
 	"errors"
+	"fmt"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -422,4 +423,39 @@ func (c *Cluster) Stats() map[string]redis.PoolStats {
 	}
 
 	return stats
+}
+
+// SplitByNode groups the given list of keys such that each slice of keys
+// belongs to the same node in the cluster. This allows you to minimize
+// connection pool thrashing. If the hash slot mapping hasn't been loaded yet,
+// an error is returned and the hash slot mapping is loaded in the background.
+func (c *Cluster) SplitByNode(keys []string) ([][]string, error) {
+	keysByNode := map[string][]string{}
+
+	c.mu.RLock()
+
+	var slot int
+	var addrs []string
+
+	for _, key := range keys {
+		slot = Slot(key)
+		addrs = c.mapping[Slot(key)]
+
+		if len(addrs) == 0 {
+			c.mu.RUnlock()
+			c.needsRefresh(nil)
+			return nil, fmt.Errorf("%s: %d", errNoNodeForSlot.Error(), slot)
+		}
+
+		keysByNode[addrs[0]] = append(keysByNode[addrs[0]], key)
+	}
+
+	c.mu.RUnlock()
+
+	groupedKeys := [][]string{}
+	for _, keys := range keysByNode {
+		groupedKeys = append(groupedKeys, keys)
+	}
+
+	return groupedKeys, nil
 }

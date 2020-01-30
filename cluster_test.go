@@ -1,6 +1,7 @@
 package redisc
 
 import (
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -518,4 +519,46 @@ func runCommands(t *testing.T, c *Cluster, cmds []redisCmd, wg *sync.WaitGroup) 
 		}
 		require.NoError(t, conn.Close(), "Close")
 	}
+}
+
+func TestClusterSplitByNode(t *testing.T) {
+	fn, ports := redistest.StartCluster(t, nil)
+	defer fn()
+
+	c := &Cluster{
+		StartupNodes: []string{":" + ports[0]},
+	}
+
+	keys := []string{"a", "b", "c", "d", "foo{d}bar"}
+	expect := [][]string{
+		[]string{"a", "d", "foo{d}bar"},
+		[]string{"b"},
+		[]string{"c"},
+	}
+
+	if assert.NoError(t, c.Refresh(), "Refresh") {
+		grouped, err := c.SplitByNode(keys)
+		assert.NoError(t, err, "SplitByNode with no mapping loaded yet")
+		assert.Equal(t, sortStringSlices(expect), sortStringSlices(grouped))
+	}
+}
+
+func TestClusterSplitByNodeNoMapping(t *testing.T) {
+	fn, ports := redistest.StartCluster(t, nil)
+	defer fn()
+
+	c := &Cluster{
+		StartupNodes: []string{":" + ports[0]},
+	}
+
+	_, err := c.SplitByNode([]string{"a", "b"})
+	assert.Error(t, err, "SplitByNode with no mapping loaded yet")
+	assert.True(t, c.refreshing)
+}
+
+func sortStringSlices(s [][]string) [][]string {
+	sort.Slice(s, func(i, j int) bool {
+		return s[i][0] < s[j][0]
+	})
+	return s
 }
