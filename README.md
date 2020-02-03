@@ -8,6 +8,8 @@ Package redisc implements a redis cluster client built on top of the [redigo pac
 
 ## Releases
 
+* **v1.1.7** : Do not bind to a random node if `Do` is called without a command and the connection is not already bound (thanks to [@tysonmote][tysonmote]).
+
 * **v1.1.6** : Append the actual error messages when a refresh returns "all nodes failed" error.
 
 * **v1.1.5** : Add `Cluster.PoolWaitTime` to configure the time to wait on a connection from a pool with `MaxActive` > 0 and `Wait` set to true (thanks to [@iwanbk][iwanbk]).
@@ -77,3 +79,4 @@ The [BSD 3-Clause license][bsd].
 [radix2]: https://github.com/mediocregopher/radix.v2
 [letsfire]: https://github.com/letsfire
 [iwanbk]: https://github.com/iwanbk
+[tysonmote]: https://github.com/tysonmote

@@ -248,8 +248,13 @@ func (c *Conn) DoWithTimeout(timeout time.Duration, cmd string, args ...interfac
 	// when returning a Redis conneciton back to the pool. If we recieve the
 	// blank command, don't bind to a random node if this connection is not bound
 	// yet.
-	if cmd == "" && c.rc == nil {
-		return nil, nil
+	if cmd == "" && len(args) == 0 {
+		c.mu.Lock()
+		rc := c.rc
+		c.mu.Unlock()
+		if rc == nil {
+			return nil, nil
+		}
 	}
 
 	rc, _, err := c.bind(cmdSlot(cmd, args))
