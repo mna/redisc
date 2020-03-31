@@ -286,3 +286,12 @@ func TestRetryConnMoved(t *testing.T) {
 		assert.Equal(t, "x", v, "GET value")
 	}
 }
+
+func TestExpBackoffInterval(t *testing.T) {
+	interval := 100 * time.Millisecond
+	assert.Equal(
+		t,
+		400*time.Millisecond,
+		expBackoffInterval(2, interval),
+		"2 attempts interval")
+}

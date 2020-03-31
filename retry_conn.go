@@ -2,6 +2,7 @@ package redisc
 
 import (
 	"errors"
+	"math"
 	"time"
 
 	"github.com/gomodule/redigo/redis"
@@ -17,18 +18,34 @@ import (
 // to successfully execute the command. The tryAgainDelay is the
 // duration to wait before retrying a TRYAGAIN error.
 func RetryConn(c redis.Conn, maxAtt int, tryAgainDelay time.Duration) (redis.Conn, error) {
-	cc, ok := c.(*Conn)
-	if !ok {
-		return nil, errors.New("redisc: connection is not a *Conn")
+	cc, err := isConn(c)
+	if err != nil {
+		return nil, err
 	}
+
 	return &retryConn{c: cc, maxAttempts: maxAtt, tryAgainDelay: tryAgainDelay}, nil
+}
+
+func RetryConnWithExpBackoff(c redis.Conn, maxAtt int, tryAgainDelay time.Duration) (redis.Conn, error) {
+	cc, err := isConn(c)
+	if err != nil {
+		return nil, err
+	}
+
+	return &retryConn{
+		c:                  cc,
+		maxAttempts:        maxAtt,
+		tryAgainDelay:      tryAgainDelay,
+		tryAgainExpBackoff: true,
+	}, nil
 }
 
 type retryConn struct {
 	c *Conn
 
-	maxAttempts   int
-	tryAgainDelay time.Duration
+	maxAttempts        int
+	tryAgainDelay      time.Duration
+	tryAgainExpBackoff bool
 }
 
 func (rc *retryConn) Do(cmd string, args ...interface{}) (interface{}, error) {
@@ -36,7 +53,7 @@ func (rc *retryConn) Do(cmd string, args ...interface{}) (interface{}, error) {
 }
 
 func (rc *retryConn) do(cmd string, args ...interface{}) (interface{}, error) {
-	var att int
+	var att, tryAgainAtt int
 	var asking bool
 
 	cluster := rc.c.cluster
@@ -53,7 +70,13 @@ func (rc *retryConn) do(cmd string, args ...interface{}) (interface{}, error) {
 		if re == nil {
 			if IsTryAgain(err) {
 				// handle retry
-				time.Sleep(rc.tryAgainDelay)
+				delay := rc.tryAgainDelay
+				if rc.tryAgainExpBackoff {
+					delay = expBackoffInterval(tryAgainAtt, rc.tryAgainDelay)
+				}
+
+				time.Sleep(delay)
+				tryAgainAtt++
 				att++
 				continue
 			}
@@ -149,4 +172,17 @@ func isIn(list []string, v string) bool {
 		}
 	}
 	return false
+}
+
+func isConn(c redis.Conn) (*Conn, error) {
+	cc, ok := c.(*Conn)
+	if !ok {
+		return nil, errors.New("redisc: connection is not a *Conn")
+	}
+
+	return cc, nil
+}
+
+func expBackoffInterval(n int, d time.Duration) time.Duration {
+	return time.Duration(int32(math.Pow(2.0, float64(n))) * int32(d))
 }
