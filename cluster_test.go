@@ -214,7 +214,7 @@ func TestCommands(t *testing.T) {
 			{"CLUSTER", redis.Args{"NODES"}, lenResult(100), ""},
 		},
 		"connection": {
-			{"AUTH", redis.Args{"pwd"}, nil, "ERR Client sent AUTH, but no password is set"},
+			{"AUTH", redis.Args{"pwd"}, nil, "AUTH"},
 			{"ECHO", redis.Args{"a"}, []byte("a"), ""},
 			{"PING", nil, "PONG", ""},
 			{"SELECT", redis.Args{1}, nil, "ERR SELECT is not allowed in cluster mode"},
