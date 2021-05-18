@@ -1,0 +1,10 @@
+image: fedora/latest
+packages:
+  - redis
+sources:
+  - https://github.com/mna/redisc
+tasks:
+  - test: |
+      cd redisc
+      go version
+      go test ./... -v
