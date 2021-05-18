@@ -1,5 +1,6 @@
 image: fedora/latest
 packages:
+  - go
   - redis
 sources:
   - https://github.com/mna/redisc
@@ -7,4 +8,5 @@ tasks:
   - test: |
       cd redisc
       go version
+      redis-server --version
       go test ./... -v
