@@ -1,4 +1,4 @@
- redisc [![GoDoc](https://godoc.org/github.com/mna/redisc?status.png)][godoc] [![Build Status](https://semaphoreci.com/api/v1/mna/redisc/branches/master/badge.svg)](https://semaphoreci.com/mna/redisc)
+ redisc [![Go Reference](https://pkg.go.dev/badge/github.com/mna/redisc.svg)](https://pkg.go.dev/github.com/mna/redisc) [![builds.sr.ht status](https://builds.sr.ht/~mna/redisc.svg)](https://builds.sr.ht/~mna/redisc?)
 
 Package redisc implements a redis cluster client built on top of the [redigo package][redigo]. See the [godoc][] for details.
 
