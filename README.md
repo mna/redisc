@@ -1,4 +1,4 @@
-# redisc [![GoDoc](https://godoc.org/github.com/mna/redisc?status.png)][godoc] [![Build Status](https://semaphoreci.com/api/v1/mna/redisc/branches/master/badge.svg)](https://semaphoreci.com/mna/redisc)
+ redisc [![GoDoc](https://godoc.org/github.com/mna/redisc?status.png)][godoc] [![Build Status](https://semaphoreci.com/api/v1/mna/redisc/branches/master/badge.svg)](https://semaphoreci.com/mna/redisc)
 
 Package redisc implements a redis cluster client built on top of the [redigo package][redigo]. See the [godoc][] for details.
 
@@ -7,6 +7,8 @@ Package redisc implements a redis cluster client built on top of the [redigo pac
     $ go get [-u] [-t] github.com/mna/redisc
 
 ## Releases
+
+* **v1.2.0** : Use Go modules, fix a failing test due to changed error message on Redis 6.
 
 * **v1.1.7** : Do not bind to a random node if `Do` is called without a command and the connection is not already bound (thanks to [@tysonmote][tysonmote]).
 
