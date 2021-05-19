@@ -1,6 +1,6 @@
 # redisc [![Go Reference](https://pkg.go.dev/badge/github.com/mna/redisc.svg)](https://pkg.go.dev/github.com/mna/redisc) [![builds.sr.ht status](https://builds.sr.ht/~mna/redisc.svg)](https://builds.sr.ht/~mna/redisc?)
 
-Package redisc implements a redis cluster client built on top of the [redigo package][redigo]. See the [godoc][] for details.
+Package redisc implements a redis cluster client built on top of the [redigo package][redigo]. See the [documentation][godoc] for details.
 
 ## Installation
 
@@ -30,7 +30,7 @@ Package redisc implements a redis cluster client built on top of the [redigo pac
 
 ## Documentation
 
-The [godoc][] is the canonical source for documentation.
+The [code documentation][godoc] is the canonical source for documentation.
 
 The design goal of redisc is to be as compatible as possible with the [redigo][] package. As such, the `Cluster` type can be used as a drop-in replacement to a `redis.Pool`, and the connections returned by the cluster implement the `redis.Conn` interface. The package offers additional features specific to dealing with a cluster that may be needed for more advanced scenarios.
 
@@ -74,7 +74,7 @@ There are a number of ways you can support the project:
 The [BSD 3-Clause license][bsd].
 
 [bsd]: http://opensource.org/licenses/BSD-3-Clause
-[godoc]: http://godoc.org/github.com/mna/redisc
+[godoc]: https://pkg.go.dev/github.com/mna/redisc
 [redigo]: https://github.com/gomodule/redigo
 [oldredigo]: https://github.com/garyburd/redigo
 [rgc]: https://github.com/chasex/redis-go-cluster
