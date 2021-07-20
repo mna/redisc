@@ -43,7 +43,7 @@ const NumClusterNodes = 3
 // If w is not nil, both stdout and stderr of the server are
 // written to it. If a configuration is specified, it is supplied
 // to the server via stdin.
-func StartServer(t *testing.T, w io.Writer, conf string) (*exec.Cmd, string) {
+func StartServer(t testing.TB, w io.Writer, conf string) (*exec.Cmd, string) {
 	if _, err := exec.LookPath("redis-server"); err != nil {
 		t.Skip("redis-server not found in $PATH")
 	}
@@ -56,7 +56,7 @@ func StartServer(t *testing.T, w io.Writer, conf string) (*exec.Cmd, string) {
 // 1 replica each. It returns the cleanup function to call after use
 // (typically in a defer) and the list of ports for each node,
 // masters first, then replicas.
-func StartClusterWithReplicas(t *testing.T, w io.Writer) (func(), []string) {
+func StartClusterWithReplicas(t testing.TB, w io.Writer) (func(), []string) {
 	fn, ports := StartCluster(t, w)
 	mapping := getClusterNodeIDs(t, ports...)
 
@@ -102,7 +102,7 @@ func StartClusterWithReplicas(t *testing.T, w io.Writer) (func(), []string) {
 // It returns a function that should be called after the test
 // (typically in a defer), and the list of ports for all nodes
 // in the cluster.
-func StartCluster(t *testing.T, w io.Writer) (func(), []string) {
+func StartCluster(t testing.TB, w io.Writer) (func(), []string) {
 	if _, err := exec.LookPath("redis-server"); err != nil {
 		t.Skip("redis-server not found in $PATH")
 	}
@@ -150,7 +150,7 @@ func StartCluster(t *testing.T, w io.Writer) (func(), []string) {
 	}, ports
 }
 
-func printClusterNodes(t *testing.T, port string) {
+func printClusterNodes(t testing.TB, port string) {
 	conn, err := redis.Dial("tcp", ":"+port)
 	require.NoError(t, err, "Dial to cluster node")
 	defer conn.Close()
@@ -160,7 +160,7 @@ func printClusterNodes(t *testing.T, port string) {
 	fmt.Println(string(res.([]byte)))
 }
 
-func printClusterSlots(t *testing.T, port string) {
+func printClusterSlots(t testing.TB, port string) {
 	conn, err := redis.Dial("tcp", ":"+port)
 	require.NoError(t, err, "Dial to cluster node")
 	defer conn.Close()
@@ -171,7 +171,7 @@ func printClusterSlots(t *testing.T, port string) {
 	fmt.Println(string(b))
 }
 
-func joinCluster(t *testing.T, nodePort, clusterPort string) {
+func joinCluster(t testing.TB, nodePort, clusterPort string) {
 	conn, err := redis.Dial("tcp", ":"+nodePort)
 	require.NoError(t, err, "Dial to node")
 	defer conn.Close()
@@ -181,7 +181,7 @@ func joinCluster(t *testing.T, nodePort, clusterPort string) {
 	require.NoError(t, err, "CLUSTER MEET")
 }
 
-func getClusterNodeIDs(t *testing.T, ports ...string) map[string]string {
+func getClusterNodeIDs(t testing.TB, ports ...string) map[string]string {
 	if len(ports) == 0 {
 		return nil
 	}
@@ -212,7 +212,7 @@ func getClusterNodeIDs(t *testing.T, ports ...string) map[string]string {
 	return mapping
 }
 
-func setupReplica(t *testing.T, replicaPort, masterID string) {
+func setupReplica(t testing.TB, replicaPort, masterID string) {
 	conn, err := redis.Dial("tcp", ":"+replicaPort)
 	require.NoError(t, err, "Dial to replica node")
 	defer conn.Close()
@@ -221,7 +221,7 @@ func setupReplica(t *testing.T, replicaPort, masterID string) {
 	require.NoError(t, err, "CLUSTER REPLICATE")
 }
 
-func setupClusterNode(t *testing.T, port string, start, count int) {
+func setupClusterNode(t testing.TB, port string, start, count int) {
 	conn, err := redis.Dial("tcp", ":"+port)
 	require.NoError(t, err, "Dial to cluster node")
 	defer conn.Close()
@@ -235,7 +235,7 @@ func setupClusterNode(t *testing.T, port string, start, count int) {
 	require.NoError(t, err, "CLUSTER ADDSLOTS")
 }
 
-func waitForReplicas(t *testing.T, timeout time.Duration, ports ...string) bool {
+func waitForReplicas(t testing.TB, timeout time.Duration, ports ...string) bool {
 	deadline := time.Now().Add(timeout)
 
 	for _, port := range ports {
@@ -273,7 +273,7 @@ func waitForReplicas(t *testing.T, timeout time.Duration, ports ...string) bool 
 	return true
 }
 
-func waitForCluster(t *testing.T, timeout time.Duration, ports ...string) bool {
+func waitForCluster(t testing.TB, timeout time.Duration, ports ...string) bool {
 	deadline := time.Now().Add(timeout)
 
 	for _, port := range ports {
@@ -297,7 +297,7 @@ func waitForCluster(t *testing.T, timeout time.Duration, ports ...string) bool {
 	return true
 }
 
-func startServerWithConfig(t *testing.T, port string, w io.Writer, conf string) *exec.Cmd {
+func startServerWithConfig(t testing.TB, port string, w io.Writer, conf string) *exec.Cmd {
 	var args []string
 	if conf == "" {
 		args = []string{"--port", port}
@@ -339,7 +339,7 @@ func waitForPort(port string, timeout time.Duration) bool {
 	return false
 }
 
-func getClusterFreePort(t *testing.T) string {
+func getClusterFreePort(t testing.TB) string {
 	const maxPort = 55535
 
 	// the port number in a redis-cluster must be below 55535 because
@@ -353,7 +353,7 @@ func getClusterFreePort(t *testing.T) string {
 	return port
 }
 
-func getFreePort(t *testing.T) string {
+func getFreePort(t testing.TB) string {
 	l, err := net.Listen("tcp", ":0")
 	require.NoError(t, err, "listen on port 0")
 	defer l.Close()
@@ -364,7 +364,7 @@ func getFreePort(t *testing.T) string {
 
 // NewPool creates a redis pool to return connections on the specified
 // addr.
-func NewPool(t *testing.T, addr string) *redis.Pool {
+func NewPool(t testing.TB, addr string) *redis.Pool {
 	return &redis.Pool{
 		MaxIdle:     2,
 		MaxActive:   10,
