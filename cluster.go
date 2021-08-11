@@ -2,6 +2,7 @@ package redisc
 
 import (
 	"errors"
+	"fmt"
 	"math/rand"
 	"strconv"
 	"strings"
@@ -74,6 +75,7 @@ func (c *Cluster) Refresh() error {
 func (c *Cluster) refresh() error {
 	var errMsgs []string
 
+	fmt.Println(">>>> refresh called")
 	addrs := c.getNodeAddrs(false)
 	for _, addr := range addrs {
 		m, err := c.getClusterSlots(addr)
@@ -81,6 +83,7 @@ func (c *Cluster) refresh() error {
 			errMsgs = append(errMsgs, err.Error())
 			continue
 		}
+		fmt.Println(">>>> refresh cluster slots done on node ", addr)
 
 		// succeeded, save as mapping
 		c.mu.Lock()
@@ -100,6 +103,7 @@ func (c *Cluster) refresh() error {
 						target = c.replicas
 					}
 					target[node] = true
+					fmt.Println(">>>> refresh cluster slots found node ", node)
 				}
 			}
 			for ix := sm.start; ix <= sm.end; ix++ {
@@ -111,6 +115,7 @@ func (c *Cluster) refresh() error {
 		for _, nodes := range []map[string]bool{c.masters, c.replicas} {
 			for k, ok := range nodes {
 				if !ok {
+					fmt.Println("!!!! refresh cluster slots dropped node ", k)
 					delete(nodes, k)
 
 					// close and remove all existing pools for removed nodes
@@ -247,6 +252,7 @@ func (c *Cluster) getConnForAddr(addr string, forceDial bool) (redis.Conn, error
 			c.pools[addr] = pool
 			p = pool
 		} else {
+			fmt.Println("!!!! unused pool immediately dropped (concurrent pool used instead)")
 			// Don't assume CreatePool just returned the pool struct, it may have
 			// used a connection or something - always match CreatePool with Close.
 			// Do it in a defer to keep lock time short.
