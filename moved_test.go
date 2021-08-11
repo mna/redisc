@@ -90,6 +90,7 @@ func TestMoved(t *testing.T) {
 
 	// list the connections *as seen from the redis nodes*
 	var redisConnsCount int
+	t.Log("Connections reported by Redis CLIENT LIST:")
 	for _, addr := range ports {
 		func() {
 			conn, err := redis.Dial("tcp", addr, redis.DialClientName("redisc-test-client-list"))
