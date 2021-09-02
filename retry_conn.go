@@ -7,15 +7,17 @@ import (
 	"github.com/gomodule/redigo/redis"
 )
 
-// RetryConn wraps the connection c (which must be a *Conn)
-// into a connection that automatically handles cluster redirections
-// (MOVED and ASK replies) and retries for TRYAGAIN errors.
-// Only Do, Close and Err can be called on that connection,
-// all other methods return an error.
+// RetryConn wraps the connection c (which must be a *redisc.Conn) into a
+// connection that automatically handles cluster redirections (MOVED and ASK
+// replies) and retries for TRYAGAIN errors.  Only Do, Close and Err can be
+// called on that connection, all other methods return an error.
 //
-// The maxAtt parameter indicates the maximum number of attempts
-// to successfully execute the command. The tryAgainDelay is the
-// duration to wait before retrying a TRYAGAIN error.
+// The maxAtt parameter indicates the maximum number of attempts to
+// successfully execute the command. The tryAgainDelay is the duration to wait
+// before retrying a TRYAGAIN error.
+//
+// The only case where it returns a non-nil error is if c is not a
+// *redisc.Conn.
 func RetryConn(c redis.Conn, maxAtt int, tryAgainDelay time.Duration) (redis.Conn, error) {
 	cc, ok := c.(*Conn)
 	if !ok {
