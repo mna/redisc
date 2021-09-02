@@ -102,7 +102,7 @@ func testReadWriteFromReplica(t *testing.T, c *Cluster, replicas []string) {
 
 	conn2 := c.Get().(*Conn)
 	defer conn2.Close()
-	ReadOnlyConn(conn2)
+	_ = ReadOnlyConn(conn2)
 
 	// can read the key from the replica (may take a moment to replicate,
 	// so retry a few times)

@@ -175,10 +175,11 @@ func printStats() {
 
 func genKey() string {
 	ks := workingSet
+	//nolint:gosec
 	if rand.Float64() > 0.5 {
 		ks = keySpace
 	}
-	return "key_" + strconv.Itoa(rand.Intn(ks))
+	return "key_" + strconv.Itoa(rand.Intn(ks)) //nolint:gosec
 }
 
 func createPool(addr string, opts ...redis.DialOption) (*redis.Pool, error) {

@@ -163,7 +163,7 @@ func (c *Cluster) needsRefresh(re *RedirError) {
 		// finished updating the mapping, so a new refresh goroutine
 		// will only be started if none is running.
 		c.refreshing = true
-		go c.refresh()
+		go c.refresh() //nolint:errcheck
 	}
 	c.mu.Unlock()
 }
@@ -286,7 +286,7 @@ func (c *Cluster) getConnForSlot(slot int, forceDial, readOnly bool) (redis.Conn
 	}
 	conn, err := c.getConnForAddr(addr, forceDial)
 	if err == nil && readOnly {
-		conn.Do("READONLY")
+		_, _ = conn.Do("READONLY")
 	}
 	return conn, addr, err
 }
@@ -295,7 +295,7 @@ func (c *Cluster) getConnForSlot(slot int, forceDial, readOnly bool) (redis.Conn
 var rnd = struct {
 	sync.Mutex
 	*rand.Rand
-}{Rand: rand.New(rand.NewSource(time.Now().UnixNano()))}
+}{Rand: rand.New(rand.NewSource(time.Now().UnixNano()))} //nolint:gosec
 
 func (c *Cluster) getRandomConn(forceDial, readOnly bool) (redis.Conn, string, error) {
 	addrs := c.getNodeAddrs(readOnly)
@@ -308,7 +308,7 @@ func (c *Cluster) getRandomConn(forceDial, readOnly bool) (redis.Conn, string, e
 		conn, err := c.getConnForAddr(addr, forceDial)
 		if err == nil {
 			if readOnly {
-				conn.Do("READONLY")
+				_, _ = conn.Do("READONLY")
 			}
 			return conn, addr, nil
 		}

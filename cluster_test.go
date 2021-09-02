@@ -15,7 +15,7 @@ import (
 
 func TestClusterRefreshNormalServer(t *testing.T) {
 	cmd, port := redistest.StartServer(t, nil, "")
-	defer cmd.Process.Kill()
+	defer cmd.Process.Kill() //nolint:errcheck
 
 	c := &Cluster{
 		StartupNodes: []string{":" + port},
@@ -138,7 +138,7 @@ func TestClusterNeedsRefresh(t *testing.T) {
 
 	// calling Do may or may not generate a MOVED error (it will get a
 	// random node, because no mapping is known yet)
-	conn.Do("GET", "b")
+	_, _ = conn.Do("GET", "b")
 
 	// wait for refreshing to become false again
 	c.mu.Lock()

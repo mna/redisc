@@ -143,7 +143,7 @@ func (c *Conn) bind(slot int) (rc redis.Conn, ok bool, err error) {
 	return rc, ok, err
 }
 
-func cmdSlot(cmd string, args []interface{}) int {
+func cmdSlot(_ string, args []interface{}) int {
 	slot := -1
 	if len(args) > 0 {
 		key := fmt.Sprintf("%s", args[0])
@@ -245,7 +245,7 @@ func (c *Conn) Do(cmd string, args ...interface{}) (interface{}, error) {
 func (c *Conn) DoWithTimeout(timeout time.Duration, cmd string, args ...interface{}) (v interface{}, err error) {
 	// The blank command is a special redigo/redis command that flushes the
 	// output buffer and receives all pending replies. This is used, for example,
-	// when returning a Redis conneciton back to the pool. If we recieve the
+	// when returning a Redis connection back to the pool. If we receive the
 	// blank command, don't bind to a random node if this connection is not bound
 	// yet.
 	if cmd == "" && len(args) == 0 {
@@ -361,7 +361,7 @@ func (c *Conn) closeLocked() (err error) {
 	if c.rc != nil {
 		// this may be a pooled connection, so make sure the readOnly flag is reset
 		if c.readOnly {
-			c.rc.Do("READWRITE")
+			_, _ = c.rc.Do("READWRITE")
 		}
 		err = c.rc.Close()
 	}

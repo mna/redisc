@@ -130,7 +130,7 @@ func (rc *retryConn) Close() error {
 	return rc.c.Close()
 }
 
-func (rc *retryConn) Send(cmd string, args ...interface{}) error {
+func (rc *retryConn) Send(_ string, _ ...interface{}) error {
 	return errors.New("redisc: unsupported call to Send")
 }
 

@@ -46,7 +46,7 @@ func TestEncode(t *testing.T) {
 			t.Errorf("%d: got error %s", i, err)
 			continue
 		}
-		if bytes.Compare(buf.Bytes(), c.enc) != 0 {
+		if !bytes.Equal(buf.Bytes(), c.enc) {
 			t.Errorf("%d: expected %x (%q), got %x (%q)", i, c.enc, string(c.enc), buf.Bytes(), buf.String())
 		}
 	}

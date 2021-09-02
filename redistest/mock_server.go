@@ -27,7 +27,7 @@ type MockServer struct {
 // encoded in the redis protocol and sent to the client. The caller should close
 // the server after use.
 func StartMockServer(t *testing.T, handler func(cmd string, args ...string) interface{}) *MockServer {
-	l, err := net.Listen("tcp", ":0")
+	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err, "net.Listen")
 
 	_, port, _ := net.SplitHostPort(l.Addr().String())
