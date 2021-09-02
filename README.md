@@ -1,4 +1,7 @@
-# redisc [![Go Reference](https://pkg.go.dev/badge/github.com/mna/redisc.svg)](https://pkg.go.dev/github.com/mna/redisc) [![builds.sr.ht status](https://builds.sr.ht/~mna/redisc.svg)](https://builds.sr.ht/~mna/redisc?)
+[![Go Reference](https://pkg.go.dev/badge/github.com/mna/redisc.svg)](https://pkg.go.dev/github.com/mna/redisc)
+[![Build Status](https://github.com/mna/redisc/actions/workflows/test.yml/badge.svg?branch=master)](https://github.com/mna/redisc/actions)
+
+# redisc
 
 Package redisc implements a redis cluster client built on top of the [redigo package][redigo]. See the [documentation][godoc] for details.
 
@@ -32,13 +35,13 @@ Package redisc implements a redis cluster client built on top of the [redigo pac
 
 The [code documentation][godoc] is the canonical source for documentation.
 
-The design goal of redisc is to be as compatible as possible with the [redigo][] package. As such, the `Cluster` type can be used as a drop-in replacement to a `redis.Pool`, and the connections returned by the cluster implement the `redis.Conn` interface. The package offers additional features specific to dealing with a cluster that may be needed for more advanced scenarios.
+The design goal of redisc is to be as compatible as possible with the [redigo][] package. As such, the `Cluster` type can be used as a drop-in replacement to a `redis.Pool` when moving from a standalone Redis to a Redis Cluster setup, and the connections returned by the cluster implement the `redis.Conn` interface. The package offers additional features specific to dealing with a cluster that may be needed for more advanced scenarios.
 
 The main features are:
 
 * Drop-in replacement for `redis.Pool` (the `Cluster` type implements the same `Get` and `Close` method signatures).
 * Connections are `redis.Conn` interfaces and use the `redigo` package to execute commands, `redisc` only handles the cluster part.
-* Support for all cluster-supported commands including scripting, transactions and pub-sub.
+* Support for all cluster-supported commands including scripting, transactions and pub-sub (within the limitations imposed by Redis Cluster).
 * Support for READONLY/READWRITE commands to allow reading data from replicas.
 * Client-side smart routing, automatically keeps track of which node holds which key slots.
 * Automatic retry of MOVED, ASK and TRYAGAIN errors when desired, via `RetryConn`.
@@ -46,6 +49,8 @@ The main features are:
 * Automatic detection of the node to call based on the command's first parameter (assumed to be the key).
 * Explicit selection of the node to call via `BindConn` when needed.
 * Support for optimal batch calls via `SplitBySlot`.
+
+Note that to make efficient use of Redis Cluster, some upfront work is usually required. A good understanding of Redis Cluster is highly recommended and the official Redis website has [good documentation that covers this](https://redis.io/topics/cluster-spec). In particular, [Migrating to Redis Cluster](https://redis.io/topics/cluster-tutorial#migrating-to-redis-cluster) will help understand how straightforward (or not) the migration may be for your specific case.
 
 ## Alternatives
 
@@ -65,9 +70,6 @@ There are a number of ways you can support the project:
   - Be mindful of existing code - PRs that break existing code have a high probability of being declined, unless it fixes a serious issue.
 * Sponsor the developer
   - See the Github Sponsor button at the top of the repo on github
-  - or via BuyMeACoffee.com, below
-
-<a href="https://www.buymeacoffee.com/mna" target="_blank"><img src="https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png" alt="Buy Me A Coffee" style="height: 41px !important;width: 174px !important;box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;-webkit-box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;" ></a>
 
 ## License
 
