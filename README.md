@@ -35,7 +35,7 @@ Package redisc implements a redis cluster client built on top of the [redigo pac
 
 The [code documentation][godoc] is the canonical source for documentation.
 
-The design goal of redisc is to be as compatible as possible with the [redigo][] package. As such, the `Cluster` type can be used as a drop-in replacement to a `redis.Pool` when moving from a standalone Redis to a Redis Cluster setup, and the connections returned by the cluster implement the `redis.Conn` interface. The package offers additional features specific to dealing with a cluster that may be needed for more advanced scenarios.
+The design goal of redisc is to be as compatible as possible with the [redigo][] package. As such, the `Cluster` type can be used as a drop-in replacement to a `redis.Pool` when moving from a standalone Redis to a Redis Cluster setup, and the connections returned by the cluster implement redigo's `redis.Conn` interface. The package offers additional features specific to dealing with a cluster that may be needed for more advanced scenarios.
 
 The main features are:
 
