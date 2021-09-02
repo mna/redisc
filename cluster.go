@@ -163,7 +163,7 @@ func (c *Cluster) needsRefresh(re *RedirError) {
 		// finished updating the mapping, so a new refresh goroutine
 		// will only be started if none is running.
 		c.refreshing = true
-		go c.refresh() //nolint:errcheck
+		go c.refresh()
 	}
 	c.mu.Unlock()
 }
