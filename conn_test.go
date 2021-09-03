@@ -148,19 +148,13 @@ func testWithReplicaBindEmptySlot(t *testing.T, c *Cluster) {
 		assert.Contains(t, err.Error(), "MOVED", "MOVED error")
 	}
 
-	// wait for refreshing to become false again
-	c.mu.Lock()
-	for c.refreshing {
-		c.mu.Unlock()
-		time.Sleep(100 * time.Millisecond)
-		c.mu.Lock()
-	}
-	for i, v := range c.mapping {
-		if !assert.NotEmpty(t, v, "Addr for %d", i) {
-			break
+	waitForClusterRefresh(c, func() {
+		for i, v := range c.mapping {
+			if !assert.NotEmpty(t, v, "Addr for %d", i) {
+				break
+			}
 		}
-	}
-	c.mu.Unlock()
+	})
 }
 
 func testWithReplicaBindRandomWithoutNode(t *testing.T, c *Cluster) {

@@ -258,12 +258,16 @@ func (c *Cluster) getClusterSlots(addr string) ([]slotMapping, error) {
 }
 
 func (c *Cluster) getConnForAddr(addr string, forceDial bool) (redis.Conn, error) {
-	// non-pooled doesn't require a lock
+	c.mu.Lock()
+
+	if err := c.err; err != nil {
+		c.mu.Unlock()
+		return nil, err
+	}
 	if c.CreatePool == nil || forceDial {
+		c.mu.Unlock()
 		return redis.Dial("tcp", addr, c.DialOptions...)
 	}
-
-	c.mu.Lock()
 
 	p := c.pools[addr]
 	if p == nil {
@@ -339,6 +343,7 @@ func (c *Cluster) getRandomConn(forceDial, readOnly bool) (redis.Conn, string, e
 	perms := rnd.Perm(len(addrs))
 	rnd.Unlock()
 
+	var errMsgs []string //nolint:prealloc
 	for _, ix := range perms {
 		addr := addrs[ix]
 		conn, err := c.getConnForAddr(addr, forceDial)
@@ -348,8 +353,14 @@ func (c *Cluster) getRandomConn(forceDial, readOnly bool) (redis.Conn, string, e
 			}
 			return conn, addr, nil
 		}
+		errMsgs = append(errMsgs, err.Error())
 	}
-	return nil, "", errors.New("redisc: failed to get a connection")
+	msg := "redisc: failed to get a connection"
+	if len(errMsgs) > 0 {
+		msg += "\n"
+		msg += strings.Join(errMsgs, "\n")
+	}
+	return nil, "", errors.New(msg)
 }
 
 func (c *Cluster) getConn(preferredSlot int, forceDial, readOnly bool) (conn redis.Conn, addr string, err error) {
@@ -455,6 +466,7 @@ func (c *Cluster) Close() error {
 				err = e
 			}
 		}
+		// keep c.pools around so that Stats can still be called after Close
 	}
 	c.mu.Unlock()
 

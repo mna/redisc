@@ -3,6 +3,7 @@ package redisc
 import (
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestClusterRefreshNormalServer(t *testing.T) {
+func TestClusterRefreshStandaloneServer(t *testing.T) {
 	cmd, port := redistest.StartServer(t, nil, "")
 	defer cmd.Process.Kill() //nolint:errcheck
 
@@ -32,7 +33,7 @@ func assertMapping(t *testing.T, mapping [hashSlots][]string, masterPorts, repli
 	pix := -1
 	expectedMappingNodes := 1 // at least a master node
 	if len(replicaPorts) > 0 {
-		// if there are replicase, then we expected 2 mapping nodes (master+replica)
+		// if there are replicas, then we expected 2 mapping nodes (master+replica)
 		expectedMappingNodes = 2
 	}
 	for ix, maps := range mapping {
@@ -140,28 +141,41 @@ func TestClusterNeedsRefresh(t *testing.T) {
 	// random node, because no mapping is known yet)
 	_, _ = conn.Do("GET", "b")
 
-	// wait for refreshing to become false again
-	c.mu.Lock()
-	for c.refreshing {
-		c.mu.Unlock()
-		time.Sleep(100 * time.Millisecond)
-		c.mu.Lock()
-	}
-	for i, v := range c.mapping {
-		if !assert.NotEmpty(t, v, "Addr for %d", i) {
-			break
+	waitForClusterRefresh(c, func() {
+		for i, v := range c.mapping {
+			if !assert.NotEmpty(t, v, "Addr for %d", i) {
+				break
+			}
 		}
-	}
-	c.mu.Unlock()
+	})
 }
 
 func TestClusterClose(t *testing.T) {
+	fn, ports := redistest.StartCluster(t, nil)
+	defer fn()
+
 	c := &Cluster{
-		StartupNodes: []string{":6379"},
+		StartupNodes: []string{":" + ports[0]},
 		DialOptions:  []redis.DialOption{redis.DialConnectTimeout(2 * time.Second)},
 		CreatePool:   createPool,
 	}
+	require.NoError(t, c.Refresh())
+
+	// get some connections before closing
+	connUnbound := c.Get()
+	defer connUnbound.Close()
+
+	connBound := c.Get()
+	defer connBound.Close()
+	_ = BindConn(connBound, "b")
+
+	connRetry := c.Get()
+	defer connRetry.Close()
+	connRetry, _ = RetryConn(connRetry, 3, time.Millisecond)
+
+	// close the cluster and check that all API works as expected
 	assert.NoError(t, c.Close(), "Close")
+
 	if err := c.Close(); assert.Error(t, err, "Close after Close") {
 		assert.Contains(t, err.Error(), "redisc: closed", "expected message")
 	}
@@ -172,6 +186,60 @@ func TestClusterClose(t *testing.T) {
 		assert.Contains(t, err.Error(), "redisc: closed", "expected message")
 	}
 	if err := c.Refresh(); assert.Error(t, err, "Refresh after Close") {
+		assert.Contains(t, err.Error(), "redisc: closed", "expected message")
+	}
+	// TODO: enable:
+	//if err := c.EachNode(false, func(c redis.Conn) error { return nil }); assert.Error(t, err, "EachNode after Close") {
+	//	assert.Contains(t, err.Error(), "redisc: closed", "expected message")
+	//}
+
+	if _, err := connUnbound.Do("SET", "a", 1); assert.Error(t, err, "unbound connection Do") {
+		assert.Contains(t, err.Error(), "redisc: closed", "expected message")
+	}
+	// connection was bound pre-cluster-close, so it already has a valid connection
+	if _, err := connBound.Do("SET", "b", 1); assert.NoError(t, err, "bound connection Do") {
+		err = connBound.Close()
+		assert.NoError(t, err)
+	}
+	if _, err := connRetry.Do("GET", "a"); assert.Error(t, err, "retry connection Do") {
+		assert.Contains(t, err.Error(), "redisc: closed", "expected message")
+	}
+
+	// Stats still works after Close
+	stats := c.Stats()
+	assert.True(t, len(stats) > 0)
+}
+
+func TestClusterClosedRefresh(t *testing.T) {
+	fn, ports := redistest.StartCluster(t, nil)
+	defer fn()
+
+	var clusterRefreshCount int64
+	var clusterRefreshErr atomic.Value
+	c := &Cluster{
+		StartupNodes: []string{":" + ports[0]},
+		DialOptions:  []redis.DialOption{redis.DialConnectTimeout(2 * time.Second)},
+		CreatePool:   createPool,
+		BgError: func(src BgErrorSrc, err error) {
+			if src == ClusterRefresh {
+				atomic.AddInt64(&clusterRefreshCount, 1)
+				clusterRefreshErr.Store(err)
+			}
+		},
+	}
+
+	conn := c.Get()
+	defer conn.Close()
+
+	// close the cluster and check that all API works as expected
+	assert.NoError(t, c.Close(), "Close")
+	if _, err := conn.Do("SET", "a", 1); assert.Error(t, err, "connection Do") {
+		assert.Contains(t, err.Error(), "redisc: closed", "expected message")
+	}
+	waitForClusterRefresh(c, nil)
+	count := atomic.LoadInt64(&clusterRefreshCount)
+	assert.Equal(t, int(count), 1)
+	if err := clusterRefreshErr.Load().(error); assert.Error(t, err, "refresh error") {
 		assert.Contains(t, err.Error(), "redisc: closed", "expected message")
 	}
 }
@@ -189,6 +257,24 @@ func createPool(addr string, opts ...redis.DialOption) (*redis.Pool, error) {
 			return err
 		},
 	}, nil
+}
+
+// waits for a running Cluster.refresh call to complete before calling fn.
+// Note that fn is called while the Cluster's lock is held - to just wait
+// for refresh to complete and continue without holding the lock, simply
+// pass nil as fn - the lock is released before this call returns.
+func waitForClusterRefresh(cluster *Cluster, fn func()) {
+	// wait for refreshing to become false again
+	cluster.mu.Lock()
+	for cluster.refreshing {
+		cluster.mu.Unlock()
+		time.Sleep(100 * time.Millisecond)
+		cluster.mu.Lock()
+	}
+	if fn != nil {
+		fn()
+	}
+	cluster.mu.Unlock()
 }
 
 type redisCmd struct {
@@ -343,7 +429,8 @@ func TestCommands(t *testing.T) {
 			{"SET", redis.Args{"s{b}", "b"}, "OK", ""},
 			{"SET", redis.Args{"s{bcd}", "c"}, "OK", ""},
 			// keys "b" (3300) and "bcd" (1872) are both in a hash slot < 5000, so on same node for this test
-			// yet it still fails with CROSSSLOT.
+			// yet it still fails with CROSSSLOT (i.e. redis does not accept multi-key commands that don't
+			// strictly hash to the same slot, regardless of which host serves them).
 			{"MGET", redis.Args{"s{b}", "s{bcd}"}, "", "CROSSSLOT"},
 		},
 		"transactions": {
