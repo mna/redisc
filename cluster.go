@@ -102,7 +102,7 @@ func (c *Cluster) Refresh() error {
 func (c *Cluster) refresh(bg bool) error {
 	var errMsgs []string
 
-	addrs := c.getNodeAddrs(false)
+	addrs, _ := c.getNodeAddrs(false)
 	for _, addr := range addrs {
 		m, err := c.getClusterSlots(addr)
 		if err != nil {
@@ -120,6 +120,7 @@ func (c *Cluster) refresh(bg bool) error {
 			c.replicas[k] = false
 		}
 
+		// TODO: keep old/new mappings to call LayoutRefresh after
 		for _, sm := range m {
 			for i, node := range sm.nodes {
 				if node != "" {
@@ -353,7 +354,7 @@ var rnd = struct {
 }{Rand: rand.New(rand.NewSource(time.Now().UnixNano()))} //nolint:gosec
 
 func (c *Cluster) getRandomConn(forceDial, readOnly bool) (redis.Conn, string, error) {
-	addrs := c.getNodeAddrs(readOnly)
+	addrs, _ := c.getNodeAddrs(readOnly)
 	rnd.Lock()
 	perms := rnd.Perm(len(addrs))
 	rnd.Unlock()
@@ -391,7 +392,7 @@ func (c *Cluster) getConn(preferredSlot int, forceDial, readOnly bool) (conn red
 	return conn, addr, err
 }
 
-func (c *Cluster) getNodeAddrs(preferReplicas bool) []string {
+func (c *Cluster) getNodeAddrs(preferReplicas bool) (addrs []string, replicas bool) {
 	c.mu.Lock()
 
 	// populate nodes lazily, only once
@@ -408,16 +409,17 @@ func (c *Cluster) getNodeAddrs(preferReplicas bool) []string {
 	from := c.masters
 	if preferReplicas && len(c.replicas) > 0 {
 		from = c.replicas
+		replicas = true
 	}
 
 	// grab a slice of addresses
-	addrs := make([]string, 0, len(from))
+	addrs = make([]string, 0, len(from))
 	for addr := range from {
 		addrs = append(addrs, addr)
 	}
 	c.mu.Unlock()
 
-	return addrs
+	return addrs, replicas
 }
 
 // Dial returns a connection the same way as Get, but it guarantees that the
@@ -452,20 +454,47 @@ func (c *Cluster) Get() redis.Conn {
 	}
 }
 
-// EachNode calls fn for each node in the cluster with a connection bound to
+// EachNode calls fn for each node in the cluster, with a connection bound to
 // that node. The connection is automatically closed (and potentially returned
 // to the pool if Cluster.CreatePool is set) after the function executes. Note
 // that conn is not a RetryConn and using one is inappropriate, as the goal of
-// EachNode is to connect to specific nodes, not to target specific keys.
+// EachNode is to connect to specific nodes, not to target specific keys. The
+// visited nodes are those that are known at the time of the call - it does not
+// force a refresh of the cluster layout. If no nodes are known, it returns an
+// error.
 //
 // If fn returns an error, no more nodes are visited and that error is returned
-// by EachNode. If preferReplica is true, it will attempt to connect to a
-// replica of each primary node, otherwise the primary nodes are visited.
-//
-// A common use of EachNode is to inspect the complete list of keys in the
-// cluster by scanning the keys on each node.
-func (c *Cluster) EachNode(preferReplica bool, fn func(conn redis.Conn) error) error {
-	panic("unimplemented")
+// by EachNode. If replicas is true, it will visit each replica node instead,
+// otherwise the primary nodes are visited. Keep in mind that if replicas is
+// true, it will visit all known replicas - which is great e.g. to run
+// diagnostics on each node, but can be surprising if the goal is e.g. to
+// collect all keys, as it is possible that more than one node is acting as
+// replica for the same primary, meaning that the same keys could be seen
+// multiple times - you should be prepared to handle this scenario. The
+// connection provided to fn is not a ReadOnly connection (conn.ReadOnly hasn't
+// been called on it), it is up to fn to execute the READONLY redis command if
+// required.
+func (c *Cluster) EachNode(replicas bool, fn func(addr string, conn redis.Conn) error) error {
+	addrs, ok := c.getNodeAddrs(replicas)
+	if len(addrs) == 0 || replicas && !ok {
+		return errors.New("redisc: no known node address")
+	}
+
+	for _, addr := range addrs {
+		conn, err := c.getConnForAddr(addr, false)
+		if err != nil {
+			// create a failed connection and still call fn, so that it can decide
+			// whether or not to keep visiting nodes.
+			conn = &Conn{
+				cluster: c,
+				err:     err,
+			}
+		}
+		if err := fn(addr, conn); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Close releases the resources used by the cluster. It closes all the pools

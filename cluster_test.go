@@ -32,6 +32,9 @@ func TestStandaloneRedis(t *testing.T) {
 	})
 }
 
+// TODO: test EachNode, with replicas (failing and ok), without replicas
+// TODO: test LayoutChange calls
+
 func TestClusterRedis(t *testing.T) {
 	fn, ports := redistest.StartCluster(t, nil)
 	defer fn()
@@ -216,10 +219,9 @@ func testClusterClose(t *testing.T, ports []string) {
 	if err := c.Refresh(); assert.Error(t, err, "Refresh after Close") {
 		assert.Contains(t, err.Error(), "redisc: closed", "expected message")
 	}
-	// TODO: enable:
-	//if err := c.EachNode(false, func(c redis.Conn) error { return nil }); assert.Error(t, err, "EachNode after Close") {
-	//	assert.Contains(t, err.Error(), "redisc: closed", "expected message")
-	//}
+	if err := c.EachNode(false, func(addr string, c redis.Conn) error { return c.Err() }); assert.Error(t, err, "EachNode after Close") {
+		assert.Contains(t, err.Error(), "redisc: closed", "expected message")
+	}
 
 	if _, err := connUnbound.Do("SET", "a", 1); assert.Error(t, err, "unbound connection Do") {
 		assert.Contains(t, err.Error(), "redisc: closed", "expected message")
