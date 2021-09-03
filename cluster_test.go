@@ -265,6 +265,7 @@ func TestCommands(t *testing.T) {
 			{"DEL", redis.Args{"k1"}, int64(1), ""},
 			{"SADD", redis.Args{"k3", "a", "z", "d"}, int64(3), ""},
 			{"SORT", redis.Args{"k3", "ALPHA"}, []interface{}{[]byte("a"), []byte("d"), []byte("z")}, ""},
+			{"DEL", redis.Args{"a", "b"}, nil, "CROSSSLOT"},
 		},
 		"lists": {
 			{"LPUSH", redis.Args{"l1", "a", "b", "c"}, int64(3), ""},
