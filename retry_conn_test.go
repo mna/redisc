@@ -180,6 +180,8 @@ func TestRetryConnErrs(t *testing.T) {
 	c := &Cluster{
 		StartupNodes: []string{":6379"},
 	}
+	defer c.Close()
+
 	conn := c.Get()
 	require.NoError(t, conn.Close(), "Close")
 
@@ -198,17 +200,13 @@ func TestRetryConnErrs(t *testing.T) {
 	assert.Error(t, err, "RetryConn with a non-*Conn")
 }
 
-func TestRetryConnTooManyAttempts(t *testing.T) {
-	fn, ports := redistest.StartCluster(t, nil)
-	defer fn()
-
-	for i, p := range ports {
-		ports[i] = ":" + p
-	}
+func testRetryConnTooManyAttempts(t *testing.T, ports []string) {
 	c := &Cluster{
 		StartupNodes: ports,
 		DialOptions:  []redis.DialOption{redis.DialConnectTimeout(2 * time.Second)},
 	}
+	defer c.Close()
+
 	require.NoError(t, c.Refresh(), "Refresh")
 
 	// create a connection and bind to key "a"
@@ -226,17 +224,13 @@ func TestRetryConnTooManyAttempts(t *testing.T) {
 	}
 }
 
-func TestRetryConnMoved(t *testing.T) {
-	fn, ports := redistest.StartCluster(t, nil)
-	defer fn()
-
-	for i, p := range ports {
-		ports[i] = ":" + p
-	}
+func testRetryConnMoved(t *testing.T, ports []string) {
 	c := &Cluster{
 		StartupNodes: ports,
 		DialOptions:  []redis.DialOption{redis.DialConnectTimeout(2 * time.Second)},
 	}
+	defer c.Close()
+
 	require.NoError(t, c.Refresh(), "Refresh")
 
 	// create a connection and bind to key "a"

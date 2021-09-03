@@ -15,18 +15,51 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestClusterRefreshStandaloneServer(t *testing.T) {
+func TestStandaloneRedis(t *testing.T) {
 	cmd, port := redistest.StartServer(t, nil, "")
 	defer cmd.Process.Kill() //nolint:errcheck
+	port = ":" + port
 
-	c := &Cluster{
-		StartupNodes: []string{":" + port},
+	t.Run("refresh", func(t *testing.T) {
+		c := &Cluster{
+			StartupNodes: []string{port},
+		}
+		err := c.Refresh()
+		if assert.Error(t, err, "Refresh") {
+			assert.Contains(t, err.Error(), "redisc: all nodes failed", "expected redisc error message")
+			assert.Contains(t, err.Error(), "cluster support disabled", "expected redis error message")
+		}
+	})
+}
+
+func TestClusterRedis(t *testing.T) {
+	fn, ports := redistest.StartCluster(t, nil)
+	defer fn()
+	for i, p := range ports {
+		ports[i] = ":" + p
 	}
-	err := c.Refresh()
-	if assert.Error(t, err, "Refresh") {
-		assert.Contains(t, err.Error(), "redisc: all nodes failed", "expected redisc error message")
-		assert.Contains(t, err.Error(), "cluster support disabled", "expected redis error message")
+
+	t.Run("refresh", func(t *testing.T) { testClusterRefresh(t, ports) })
+	t.Run("needs refresh", func(t *testing.T) { testClusterNeedsRefresh(t, ports) })
+	t.Run("close", func(t *testing.T) { testClusterClose(t, ports) })
+	t.Run("closed refresh", func(t *testing.T) { testClusterClosedRefresh(t, ports) })
+	t.Run("conn readonly no replica", func(t *testing.T) { testConnReadOnlyNoReplica(t, ports) })
+	t.Run("conn bind", func(t *testing.T) { testConnBind(t, ports) })
+	t.Run("conn blank do", func(t *testing.T) { testConnBlankDo(t, ports) })
+	t.Run("conn with timeout", func(t *testing.T) { testConnWithTimeout(t, ports) })
+	t.Run("retry conn too many attempts", func(t *testing.T) { testRetryConnTooManyAttempts(t, ports) })
+	t.Run("retry conn moved", func(t *testing.T) { testRetryConnMoved(t, ports) })
+}
+
+func TestClusterRedisWithReplica(t *testing.T) {
+	fn, ports := redistest.StartClusterWithReplicas(t, nil)
+	defer fn()
+	for i, p := range ports {
+		ports[i] = ":" + p
 	}
+
+	t.Run("refresh startup nodes a replica", func(t *testing.T) { testClusterRefreshStartWithReplica(t, ports) })
+	t.Run("conn readonly", func(t *testing.T) { testConnReadOnlyWithReplicas(t, ports) })
 }
 
 func assertMapping(t *testing.T, mapping [hashSlots][]string, masterPorts, replicaPorts []string) {
@@ -46,23 +79,21 @@ func assertMapping(t *testing.T, mapping [hashSlots][]string, masterPorts, repli
 			}
 			if assert.NotEmpty(t, maps[0]) {
 				split := strings.Index(maps[0], ":")
-				assert.Contains(t, masterPorts, maps[0][split+1:], "expected master")
+				assert.Contains(t, masterPorts, maps[0][split:], "expected master")
 			}
 			if len(maps) > 1 && assert.NotEmpty(t, maps[1]) {
 				split := strings.Index(maps[1], ":")
-				assert.Contains(t, replicaPorts, maps[1][split+1:], "expected replica")
+				assert.Contains(t, replicaPorts, maps[1][split:], "expected replica")
 			}
 		}
 	}
 }
 
-func TestClusterRefresh(t *testing.T) {
-	fn, ports := redistest.StartCluster(t, nil)
-	defer fn()
-
+func testClusterRefresh(t *testing.T, ports []string) {
 	c := &Cluster{
-		StartupNodes: []string{":" + ports[0]},
+		StartupNodes: []string{ports[0]},
 	}
+	defer c.Close()
 
 	err := c.Refresh()
 	if assert.NoError(t, err, "Refresh") {
@@ -70,13 +101,12 @@ func TestClusterRefresh(t *testing.T) {
 	}
 }
 
-func TestClusterRefreshStartWithReplica(t *testing.T) {
-	fn, ports := redistest.StartClusterWithReplicas(t, nil)
-	defer fn()
-
+func testClusterRefreshStartWithReplica(t *testing.T, ports []string) {
 	c := &Cluster{
-		StartupNodes: []string{":" + ports[len(ports)-1]}, // last port is a replica
+		StartupNodes: []string{ports[len(ports)-1]}, // last port is a replica
 	}
+	defer c.Close()
+
 	err := c.Refresh()
 	if assert.NoError(t, err, "Refresh") {
 		assertMapping(t, c.mapping, ports[:redistest.NumClusterNodes], ports[redistest.NumClusterNodes:])
@@ -92,6 +122,8 @@ func TestClusterRefreshAllFail(t *testing.T) {
 	c := &Cluster{
 		StartupNodes: []string{s.Addr},
 	}
+	defer c.Close()
+
 	if err := c.Refresh(); assert.Error(t, err, "Refresh") {
 		assert.Contains(t, err.Error(), "all nodes failed", "expected message")
 		assert.Contains(t, err.Error(), "nope", "expected server message")
@@ -101,6 +133,8 @@ func TestClusterRefreshAllFail(t *testing.T) {
 
 func TestClusterNoNode(t *testing.T) {
 	c := &Cluster{}
+	defer c.Close()
+
 	conn := c.Get()
 	_, err := conn.Do("A")
 	if assert.Error(t, err, "Do") {
@@ -114,13 +148,7 @@ func TestClusterNoNode(t *testing.T) {
 	}
 }
 
-func TestClusterNeedsRefresh(t *testing.T) {
-	fn, ports := redistest.StartCluster(t, nil)
-	defer fn()
-
-	for i, p := range ports {
-		ports[i] = ":" + p
-	}
+func testClusterNeedsRefresh(t *testing.T, ports []string) {
 	c := &Cluster{
 		StartupNodes: ports,
 	}
@@ -151,15 +179,14 @@ func TestClusterNeedsRefresh(t *testing.T) {
 	})
 }
 
-func TestClusterClose(t *testing.T) {
-	fn, ports := redistest.StartCluster(t, nil)
-	defer fn()
-
+func testClusterClose(t *testing.T, ports []string) {
 	c := &Cluster{
-		StartupNodes: []string{":" + ports[0]},
+		StartupNodes: []string{ports[0]},
 		DialOptions:  []redis.DialOption{redis.DialConnectTimeout(2 * time.Second)},
 		CreatePool:   createPool,
 	}
+	defer c.Close()
+
 	require.NoError(t, c.Refresh())
 
 	// get some connections before closing
@@ -211,14 +238,12 @@ func TestClusterClose(t *testing.T) {
 	assert.True(t, len(stats) > 0)
 }
 
-func TestClusterClosedRefresh(t *testing.T) {
-	fn, ports := redistest.StartCluster(t, nil)
-	defer fn()
-
+func testClusterClosedRefresh(t *testing.T, ports []string) {
 	var clusterRefreshCount int64
 	var clusterRefreshErr atomic.Value
+
 	c := &Cluster{
-		StartupNodes: []string{":" + ports[0]},
+		StartupNodes: []string{ports[0]},
 		DialOptions:  []redis.DialOption{redis.DialConnectTimeout(2 * time.Second)},
 		CreatePool:   createPool,
 		BgError: func(src BgErrorSrc, err error) {
@@ -228,6 +253,7 @@ func TestClusterClosedRefresh(t *testing.T) {
 			}
 		},
 	}
+	defer c.Close()
 
 	conn := c.Get()
 	defer conn.Close()
@@ -263,6 +289,8 @@ func TestGetPoolTimedOut(t *testing.T) {
 	c := Cluster{
 		PoolWaitTime: 100 * time.Millisecond,
 	}
+	defer c.Close()
+
 	conn, err := c.getFromPool(p)
 	if assert.NoError(t, err) {
 		defer conn.Close()
@@ -300,6 +328,7 @@ func TestGetPoolWaitOnFull(t *testing.T) {
 	c := Cluster{
 		PoolWaitTime: waitTime,
 	}
+	defer c.Close()
 
 	// first connection OK
 	conn, err := c.getFromPool(p)
@@ -369,9 +398,6 @@ type redisCmd struct {
 type lenResult int
 
 func TestCommands(t *testing.T) {
-	fn, ports := redistest.StartCluster(t, nil)
-	defer fn()
-
 	cmdsPerGroup := map[string][]redisCmd{
 		"cluster": {
 			{"CLUSTER", redis.Args{"INFO"}, lenResult(10), ""},
@@ -526,6 +552,9 @@ func TestCommands(t *testing.T) {
 		},
 	}
 
+	fn, ports := redistest.StartCluster(t, nil)
+	defer fn()
+
 	for i, p := range ports {
 		ports[i] = ":" + p
 	}
@@ -534,6 +563,8 @@ func TestCommands(t *testing.T) {
 		DialOptions:  []redis.DialOption{redis.DialConnectTimeout(2 * time.Second)},
 		CreatePool:   createPool,
 	}
+	defer c.Close()
+
 	require.NoError(t, c.Refresh(), "Refresh")
 
 	var wg sync.WaitGroup

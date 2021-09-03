@@ -14,27 +14,32 @@ import (
 )
 
 // Test the conn.ReadOnly behaviour in a cluster setup with 1 replica per
-// node. Runs multiple tests in the same function because setting up
-// such a cluster is slow.
-func TestConnReadOnlyWithReplicas(t *testing.T) {
-	fn, ports := redistest.StartClusterWithReplicas(t, nil)
-	defer fn()
+// node.
+func testConnReadOnlyWithReplicas(t *testing.T, ports []string) {
+	t.Run("bind random without node", func(t *testing.T) {
+		c := &Cluster{}
+		defer c.Close()
+		testWithReplicaBindRandomWithoutNode(t, c)
+	})
 
-	c := &Cluster{}
-	testWithReplicaBindRandomWithoutNode(t, c)
+	t.Run("bind empty slot", func(t *testing.T) {
+		c := &Cluster{StartupNodes: []string{ports[0]}}
+		defer c.Close()
+		testWithReplicaBindEmptySlot(t, c)
+	})
 
-	c = &Cluster{StartupNodes: []string{":" + ports[0]}}
-	testWithReplicaBindEmptySlot(t, c)
+	t.Run("with refresh", func(t *testing.T) {
+		c := &Cluster{StartupNodes: []string{ports[0]}}
+		defer c.Close()
+		testWithReplicaClusterRefresh(t, c, ports)
 
-	c = &Cluster{StartupNodes: []string{":" + ports[0]}}
-	testWithReplicaClusterRefresh(t, c, ports)
+		// at this point the cluster has refreshed its mapping
+		testReadWriteFromReplica(t, c, ports[redistest.NumClusterNodes:])
 
-	// at this point the cluster has refreshed its mapping
-	testReadWriteFromReplica(t, c, ports[redistest.NumClusterNodes:])
+		testReadOnlyWithRandomConn(t, c, ports[redistest.NumClusterNodes:])
 
-	testReadOnlyWithRandomConn(t, c, ports[redistest.NumClusterNodes:])
-
-	testRetryReadOnlyConn(t, c, ports[:redistest.NumClusterNodes], ports[redistest.NumClusterNodes:])
+		testRetryReadOnlyConn(t, c, ports[:redistest.NumClusterNodes], ports[redistest.NumClusterNodes:])
+	})
 }
 
 func testRetryReadOnlyConn(t *testing.T, c *Cluster, masters []string, replicas []string) {
@@ -73,7 +78,7 @@ func assertBoundTo(t *testing.T, conn *Conn, ports []string) string {
 
 	found := false
 	for _, port := range ports {
-		if strings.HasSuffix(addr, ":"+port) {
+		if strings.HasSuffix(addr, port) {
 			found = true
 			break
 		}
@@ -179,8 +184,8 @@ func testWithReplicaClusterRefresh(t *testing.T, c *Cluster, ports []string) {
 				}
 				if assert.NotEmpty(t, node[0]) {
 					split0, split1 := strings.Index(node[0], ":"), strings.Index(node[1], ":")
-					assert.Contains(t, ports, node[0][split0+1:], "expected address")
-					assert.Contains(t, ports, node[1][split1+1:], "expected address")
+					assert.Contains(t, ports, node[0][split0:], "expected address")
+					assert.Contains(t, ports, node[1][split1:], "expected address")
 				}
 			} else {
 				break
@@ -189,13 +194,11 @@ func testWithReplicaClusterRefresh(t *testing.T, c *Cluster, ports []string) {
 	}
 }
 
-func TestConnReadOnly(t *testing.T) {
-	fn, ports := redistest.StartCluster(t, nil)
-	defer fn()
-
+func testConnReadOnlyNoReplica(t *testing.T, ports []string) {
 	c := &Cluster{
-		StartupNodes: []string{":" + ports[0]},
+		StartupNodes: []string{ports[0]},
 	}
+	defer c.Close()
 	require.NoError(t, c.Refresh(), "Refresh")
 
 	conn := c.Get()
@@ -218,17 +221,12 @@ func TestConnReadOnly(t *testing.T) {
 	assert.Error(t, cc2.ReadOnly(), "ReadOnly after Bind")
 }
 
-func TestConnBind(t *testing.T) {
-	fn, ports := redistest.StartCluster(t, nil)
-	defer fn()
-
-	for i, p := range ports {
-		ports[i] = ":" + p
-	}
+func testConnBind(t *testing.T, ports []string) {
 	c := &Cluster{
 		StartupNodes: ports,
 		DialOptions:  []redis.DialOption{redis.DialConnectTimeout(2 * time.Second)},
 	}
+	defer c.Close()
 	require.NoError(t, c.Refresh(), "Refresh")
 
 	conn := c.Get()
@@ -248,17 +246,12 @@ func TestConnBind(t *testing.T) {
 	assert.NoError(t, BindConn(conn2), "Bind without key")
 }
 
-func TestConnBlankDo(t *testing.T) {
-	fn, ports := redistest.StartCluster(t, nil)
-	defer fn()
-
-	for i, p := range ports {
-		ports[i] = ":" + p
-	}
+func testConnBlankDo(t *testing.T, ports []string) {
 	c := &Cluster{
 		StartupNodes: ports,
 		DialOptions:  []redis.DialOption{redis.DialConnectTimeout(2 * time.Second)},
 	}
+	defer c.Close()
 	require.NoError(t, c.Refresh(), "Refresh")
 
 	conn := c.Get()
@@ -274,17 +267,15 @@ func TestConnBlankDo(t *testing.T) {
 	assert.NotNil(t, cconn.rc)
 }
 
-func TestConnWithTimeout(t *testing.T) {
-	fn, ports := redistest.StartCluster(t, nil)
-	defer fn()
-
+func testConnWithTimeout(t *testing.T, ports []string) {
 	c := &Cluster{
-		StartupNodes: []string{":" + ports[0]},
+		StartupNodes: []string{ports[0]},
 		DialOptions: []redis.DialOption{
 			redis.DialConnectTimeout(2 * time.Second),
 			redis.DialReadTimeout(time.Second),
 		},
 	}
+	defer c.Close()
 	require.NoError(t, c.Refresh(), "Refresh")
 
 	testConnDoWithTimeout(t, c)
@@ -344,6 +335,8 @@ func TestConnClose(t *testing.T) {
 	c := &Cluster{
 		StartupNodes: []string{":6379"},
 	}
+	defer c.Close()
+
 	conn := c.Get()
 	require.NoError(t, conn.Close(), "Close")
 
