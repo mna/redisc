@@ -13,6 +13,20 @@ import (
 
 const hashSlots = 16384
 
+// BgErrorSrc identifies the origin of a background error as reported by calls
+// to Cluster.BgError, when set.
+type BgErrorSrc uint
+
+// List of possible BgErrorSrc values.
+const (
+	// ClusterRefresh indicates the error comes from a background refresh of
+	// cluster slots mapping, e.g. following reception of a MOVED error.
+	ClusterRefresh BgErrorSrc = iota
+	// RetryCloseConn indicates the error comes from the call to Close for a
+	// previous connection, before retrying a command with a new one.
+	RetryCloseConn
+)
+
 // A Cluster manages a redis cluster. If the CreatePool field is not nil, a
 // redis.Pool is used for each node in the cluster to get connections via Get.
 // If it is nil or if Dial is called, redis.Dial is used to get the connection.
@@ -41,6 +55,20 @@ type Cluster struct {
 	// indefinitely if Pool.Wait is true.
 	PoolWaitTime time.Duration
 
+	// BgError is an optional function to call when a background error occurs
+	// that would otherwise go unnoticed. The source of the error is indicated
+	// by the parameter of type BgErrorSrc, see the list of BgErrorSrc values
+	// for possible error sources. The function may be called in a distinct
+	// goroutine, it should not access shared values that are not meant to be
+	// used concurrently.
+	BgError func(BgErrorSrc, error)
+
+	// LayoutRefresh is an optional function that is called each time a cluster
+	// refresh is successfully executed, either by an explicit call to
+	// Cluster.Refresh or e.g.  as required following a MOVED error. Note that
+	// even though it is unlikely, the old and new mappings could be identical.
+	LayoutRefresh func(old, new [hashSlots][]string)
+
 	mu         sync.RWMutex           // protects following fields
 	err        error                  // closed cluster error
 	pools      map[string]*redis.Pool // created pools per node address
@@ -67,10 +95,10 @@ func (c *Cluster) Refresh() error {
 		return err
 	}
 
-	return c.refresh()
+	return c.refresh(false)
 }
 
-func (c *Cluster) refresh() error {
+func (c *Cluster) refresh(bg bool) error {
 	var errMsgs []string
 
 	addrs := c.getNodeAddrs(false)
@@ -114,7 +142,7 @@ func (c *Cluster) refresh() error {
 
 					// close and remove all existing pools for removed nodes
 					if p := c.pools[k]; p != nil {
-						// TODO: background error if pool.Close fails
+						// Pool.Close always returns nil
 						p.Close()
 						delete(c.pools, k)
 					}
@@ -134,10 +162,15 @@ func (c *Cluster) refresh() error {
 	c.refreshing = false
 	c.mu.Unlock()
 
-	// TODO: background error for refresh
 	msg := "redisc: all nodes failed\n"
 	msg += strings.Join(errMsgs, "\n")
-	return errors.New(msg)
+	err := errors.New(msg)
+	if bg && c.BgError != nil {
+		// in bg mode, this is already called in a distinct goroutine, so do not
+		// call BgError in a distinct one.
+		c.BgError(ClusterRefresh, err)
+	}
+	return err
 }
 
 // needsRefresh handles automatic update of the mapping, either because no node
@@ -165,7 +198,7 @@ func (c *Cluster) needsRefresh(re *RedirError) {
 		// mapping, so a new refresh goroutine will only be started if none is
 		// running.
 		c.refreshing = true
-		go c.refresh() //nolint:errcheck
+		go c.refresh(true) //nolint:errcheck
 	}
 	c.mu.Unlock()
 }
@@ -251,7 +284,8 @@ func (c *Cluster) getConnForAddr(addr string, forceDial bool) (redis.Conn, error
 		} else {
 			// Don't assume CreatePool just returned the pool struct, it may have
 			// used a connection or something - always match CreatePool with Close.
-			// Do it in a defer to keep lock time short.
+			// Do it in a defer to keep lock time short. Pool.Close always returns
+			// nil.
 			defer pool.Close()
 		}
 	}
@@ -392,6 +426,22 @@ func (c *Cluster) Get() redis.Conn {
 	}
 }
 
+// EachNode calls fn for each node in the cluster with a connection bound to
+// that node. The connection is automatically closed (and potentially returned
+// to the pool if Cluster.CreatePool is set) after the function executes. Note
+// that conn is not a RetryConn and using one is inappropriate, as the goal of
+// EachNode is to connect to specific nodes, not to target specific keys.
+//
+// If fn returns an error, no more nodes are visited and that error is returned
+// by EachNode. If preferReplica is true, it will attempt to connect to a
+// replica of each primary node, otherwise the primary nodes are visited.
+//
+// A common use of EachNode is to inspect the complete list of keys in the
+// cluster by scanning the keys on each node.
+func (c *Cluster) EachNode(preferReplica bool, fn func(conn redis.Conn) error) error {
+	panic("unimplemented")
+}
+
 // Close releases the resources used by the cluster. It closes all the pools
 // that were created, if any.
 func (c *Cluster) Close() error {
@@ -401,6 +451,7 @@ func (c *Cluster) Close() error {
 		c.err = errors.New("redisc: closed")
 		for _, p := range c.pools {
 			if e := p.Close(); e != nil && err == nil {
+				// note that Pool.Close always returns nil.
 				err = e
 			}
 		}

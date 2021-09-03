@@ -109,14 +109,18 @@ func (rc *retryConn) do(cmd string, args ...interface{}) (interface{}, error) {
 			}
 		}
 
+		var cerr error
 		rc.c.mu.Lock()
 		// close and replace the old connection (close must come before assignments)
-		// TODO: background error for closing old connection
-		rc.c.closeLocked()
+		cerr = rc.c.closeLocked()
 		rc.c.rc = conn
 		rc.c.boundAddr = addr
 		rc.c.readOnly = readOnly
 		rc.c.mu.Unlock()
+
+		if cerr != nil && cluster.BgError != nil {
+			go cluster.BgError(RetryCloseConn, cerr)
+		}
 
 		att++
 	}
