@@ -32,7 +32,6 @@ func TestStandaloneRedis(t *testing.T) {
 	})
 }
 
-// TODO: test EachNode, with replicas (failing and ok), without replicas
 // TODO: test LayoutChange calls
 
 func TestClusterRedis(t *testing.T) {
@@ -52,6 +51,8 @@ func TestClusterRedis(t *testing.T) {
 	t.Run("conn with timeout", func(t *testing.T) { testConnWithTimeout(t, ports) })
 	t.Run("retry conn too many attempts", func(t *testing.T) { testRetryConnTooManyAttempts(t, ports) })
 	t.Run("retry conn moved", func(t *testing.T) { testRetryConnMoved(t, ports) })
+	t.Run("each node none", func(t *testing.T) { testEachNodeNone(t, ports) })
+	t.Run("each node some", func(t *testing.T) { testEachNodeSome(t, ports) })
 }
 
 func TestClusterRedisWithReplica(t *testing.T) {
@@ -63,6 +64,8 @@ func TestClusterRedisWithReplica(t *testing.T) {
 
 	t.Run("refresh startup nodes a replica", func(t *testing.T) { testClusterRefreshStartWithReplica(t, ports) })
 	t.Run("conn readonly", func(t *testing.T) { testConnReadOnlyWithReplicas(t, ports) })
+	t.Run("each node some", func(t *testing.T) { testEachNodeSomeWithReplica(t, ports) })
+	t.Run("each node scan keys", func(t *testing.T) { testEachNodeScanKeysWithReplica(t, ports) })
 }
 
 func assertMapping(t *testing.T, mapping [hashSlots][]string, masterPorts, replicaPorts []string) {
@@ -90,6 +93,234 @@ func assertMapping(t *testing.T, mapping [hashSlots][]string, masterPorts, repli
 			}
 		}
 	}
+}
+
+func testEachNodeNone(t *testing.T, _ []string) {
+	c := &Cluster{}
+	defer c.Close()
+
+	// no known node
+	var count int
+	err := c.EachNode(false, func(addr string, conn redis.Conn) error {
+		count++
+		return nil
+	})
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), "no known node")
+	}
+	assert.Equal(t, 0, count)
+
+	// no known replica
+	count = 0
+	err = c.EachNode(true, func(addr string, conn redis.Conn) error {
+		count++
+		return nil
+	})
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), "no known node")
+	}
+	assert.Equal(t, 0, count)
+}
+
+func assertNodeIdentity(t *testing.T, conn redis.Conn, gotAddr, wantPort, wantRole string) {
+	assertNodeIdentityIn(t, conn, gotAddr, wantRole, map[string]bool{wantPort: true})
+}
+
+func assertNodeIdentityIn(t *testing.T, conn redis.Conn, gotAddr, wantRole string, portIn map[string]bool) {
+	var foundPort string
+	for port := range portIn {
+		if strings.HasSuffix(gotAddr, port) {
+			foundPort = port
+			delete(portIn, port)
+		}
+	}
+	assert.NotEmpty(t, foundPort, "address not in %#v", portIn)
+	vs, err := redis.Values(conn.Do("ROLE"))
+	require.NoError(t, err)
+
+	var role string
+	_, err = redis.Scan(vs, &role)
+	require.NoError(t, err)
+	assert.Equal(t, wantRole, role)
+
+	info, err := redis.String(conn.Do("INFO", "server"))
+	require.NoError(t, err)
+	assert.Contains(t, info, "tcp_port"+foundPort)
+}
+
+func testEachNodeSome(t *testing.T, ports []string) {
+	c := &Cluster{
+		StartupNodes: []string{ports[0]},
+	}
+	defer c.Close()
+
+	// only the single startup node at the moment
+	var count int
+	err := c.EachNode(false, func(addr string, conn redis.Conn) error {
+		count++
+		assertNodeIdentity(t, conn, addr, ports[0], "master")
+		return nil
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, 1, count)
+
+	// no known replica
+	count = 0
+	err = c.EachNode(true, func(addr string, conn redis.Conn) error {
+		count++
+		return nil
+	})
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), "no known node")
+	}
+	assert.Equal(t, 0, count)
+
+	require.NoError(t, c.Refresh())
+
+	portsIn := make(map[string]bool, len(ports))
+	for _, port := range ports {
+		portsIn[port] = true
+	}
+
+	count = 0
+	err = c.EachNode(false, func(addr string, conn redis.Conn) error {
+		count++
+		assertNodeIdentityIn(t, conn, addr, "master", portsIn)
+		return nil
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, len(ports), count)
+
+	// no known replica
+	count = 0
+	err = c.EachNode(true, func(addr string, conn redis.Conn) error {
+		count++
+		return nil
+	})
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), "no known node")
+	}
+	assert.Equal(t, 0, count)
+}
+
+func testEachNodeSomeWithReplica(t *testing.T, ports []string) {
+	c := &Cluster{
+		StartupNodes: []string{ports[0]},
+	}
+	defer c.Close()
+
+	// only the single startup node at the moment
+	var count int
+	err := c.EachNode(false, func(addr string, conn redis.Conn) error {
+		count++
+		assertNodeIdentity(t, conn, addr, ports[0], "master")
+		return nil
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, 1, count)
+
+	// no known replica
+	count = 0
+	err = c.EachNode(true, func(addr string, conn redis.Conn) error {
+		count++
+		return nil
+	})
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), "no known node")
+	}
+	assert.Equal(t, 0, count)
+
+	require.NoError(t, c.Refresh())
+
+	// visit each primary
+	primaries, replicas := ports[:redistest.NumClusterNodes], ports[redistest.NumClusterNodes:]
+	portsIn := make(map[string]bool, len(primaries))
+	for _, port := range primaries {
+		portsIn[port] = true
+	}
+
+	count = 0
+	err = c.EachNode(false, func(addr string, conn redis.Conn) error {
+		count++
+		assertNodeIdentityIn(t, conn, addr, "master", portsIn)
+		return nil
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, len(primaries), count)
+
+	// visit each replica
+	portsIn = make(map[string]bool, len(replicas))
+	for _, port := range replicas {
+		portsIn[port] = true
+	}
+
+	count = 0
+	err = c.EachNode(true, func(addr string, conn redis.Conn) error {
+		count++
+		assertNodeIdentityIn(t, conn, addr, "slave", portsIn)
+		return nil
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, len(replicas), count)
+}
+
+func testEachNodeScanKeysWithReplica(t *testing.T, ports []string) {
+	c := &Cluster{
+		StartupNodes: []string{ports[0]},
+	}
+	defer c.Close()
+	require.NoError(t, c.Refresh())
+
+	conn := c.Get()
+	conn, _ = RetryConn(conn, 3, 100*time.Millisecond)
+	defer conn.Close()
+
+	const prefix = "eachnode:"
+	keys := []string{"a", "b", "c", "d", "e"}
+	for i, k := range keys {
+		k = prefix + "{" + k + "}"
+		keys[i] = k
+		_, err := conn.Do("SET", k, i)
+		require.NoError(t, err)
+	}
+
+	// collect from primaries
+	var gotKeys []string
+	err := c.EachNode(false, func(addr string, conn redis.Conn) error {
+		var cursor int
+		for {
+			var keyList []string
+			vs, err := redis.Values(conn.Do("SCAN", cursor, "MATCH", prefix+"*"))
+			require.NoError(t, err)
+			_, err = redis.Scan(vs, &cursor, &keyList)
+			require.NoError(t, err)
+			gotKeys = append(gotKeys, keyList...)
+			if cursor == 0 {
+				return nil
+			}
+		}
+	})
+	require.NoError(t, err)
+	assert.ElementsMatch(t, keys, gotKeys)
+
+	// collect from replicas
+	gotKeys = nil
+	err = c.EachNode(true, func(addr string, conn redis.Conn) error {
+		var cursor int
+		for {
+			var keyList []string
+			vs, err := redis.Values(conn.Do("SCAN", cursor, "MATCH", prefix+"*"))
+			require.NoError(t, err)
+			_, err = redis.Scan(vs, &cursor, &keyList)
+			require.NoError(t, err)
+			gotKeys = append(gotKeys, keyList...)
+			if cursor == 0 {
+				return nil
+			}
+		}
+	})
+	require.NoError(t, err)
+	assert.ElementsMatch(t, keys, gotKeys)
 }
 
 func testClusterRefresh(t *testing.T, ports []string) {
