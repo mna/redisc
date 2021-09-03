@@ -244,6 +244,7 @@ func testClusterClosedRefresh(t *testing.T, ports []string) {
 	var clusterRefreshCount int64
 	var clusterRefreshErr atomic.Value
 
+	done := make(chan bool)
 	c := &Cluster{
 		StartupNodes: []string{ports[0]},
 		DialOptions:  []redis.DialOption{redis.DialConnectTimeout(2 * time.Second)},
@@ -252,6 +253,7 @@ func testClusterClosedRefresh(t *testing.T, ports []string) {
 			if src == ClusterRefresh {
 				atomic.AddInt64(&clusterRefreshCount, 1)
 				clusterRefreshErr.Store(err)
+				done <- true
 			}
 		},
 	}
@@ -266,10 +268,18 @@ func testClusterClosedRefresh(t *testing.T, ports []string) {
 		assert.Contains(t, err.Error(), "redisc: closed", "expected message")
 	}
 	waitForClusterRefresh(c, nil)
-	count := atomic.LoadInt64(&clusterRefreshCount)
-	assert.Equal(t, int(count), 1)
-	if err := clusterRefreshErr.Load().(error); assert.Error(t, err, "refresh error") {
-		assert.Contains(t, err.Error(), "redisc: closed", "expected message")
+
+	// BgError call might not have completed yet, so wait for the channel
+	// receive, or fail after a second.
+	select {
+	case <-time.After(time.Second):
+		require.Fail(t, "BgError call not done after timeout")
+	case <-done:
+		count := atomic.LoadInt64(&clusterRefreshCount)
+		require.Equal(t, int(count), 1)
+		if err := clusterRefreshErr.Load().(error); assert.Error(t, err, "refresh error") {
+			assert.Contains(t, err.Error(), "redisc: closed", "expected message")
+		}
 	}
 }
 
