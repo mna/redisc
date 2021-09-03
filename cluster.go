@@ -13,50 +13,49 @@ import (
 
 const hashSlots = 16384
 
-// Cluster manages a redis cluster. If the CreatePool field is not nil,
-// a redis.Pool is used for each node in the cluster to get connections
-// via Get. If it is nil or if Dial is called, redis.Dial
-// is used to get the connection.
+// A Cluster manages a redis cluster. If the CreatePool field is not nil, a
+// redis.Pool is used for each node in the cluster to get connections via Get.
+// If it is nil or if Dial is called, redis.Dial is used to get the connection.
+//
+// All fields must be set prior to using the Cluster value, and must not be
+// changed afterwards, as that could be a data race.
 type Cluster struct {
-	// StartupNodes is the list of initial nodes that make up
-	// the cluster. The values are expected as "address:port"
-	// (e.g.: "127.0.0.1:6379").
+	// StartupNodes is the list of initial nodes that make up the cluster. The
+	// values are expected as "address:port" (e.g.: "127.0.0.1:6379").
 	StartupNodes []string
 
 	// DialOptions is the list of options to set on each new connection.
 	DialOptions []redis.DialOption
 
-	// CreatePool is the function to call to create a redis.Pool for
-	// the specified TCP address, using the provided options
-	// as set in DialOptions. If this field is not nil, a
-	// redis.Pool is created for each node in the cluster and the
-	// pool is used to manage the connections returned by Get.
+	// CreatePool is the function to call to create a redis.Pool for the
+	// specified TCP address, using the provided options as set in DialOptions.
+	// If this field is not nil, a redis.Pool is created for each node in the
+	// cluster and the pool is used to manage the connections returned by Get.
 	CreatePool func(address string, options ...redis.DialOption) (*redis.Pool, error)
 
-	// PoolWaitTime is the time to wait when getting a connection from
-	// a pool configured with MaxActive > 0 and Wait set to true, and
-	// MaxActive connections are already in use.
+	// PoolWaitTime is the time to wait when getting a connection from a pool
+	// configured with MaxActive > 0 and Wait set to true, and MaxActive
+	// connections are already in use.
 	//
 	// If <= 0 (or with Go < 1.7), there is no wait timeout, it will wait
 	// indefinitely if Pool.Wait is true.
 	PoolWaitTime time.Duration
 
 	mu         sync.RWMutex           // protects following fields
-	err        error                  // broken connection error
-	pools      map[string]*redis.Pool // created pools per node
-	masters    map[string]bool        // set of known active master nodes, kept up-to-date
-	replicas   map[string]bool        // set of known active replica nodes, kept up-to-date
-	mapping    [hashSlots][]string    // hash slot number to master and replica(s) server addresses, master is always at [0]
+	err        error                  // closed cluster error
+	pools      map[string]*redis.Pool // created pools per node address
+	masters    map[string]bool        // set of known active master nodes addresses, kept up-to-date
+	replicas   map[string]bool        // set of known active replica nodes addresses, kept up-to-date
+	mapping    [hashSlots][]string    // hash slot number to master and replica(s) addresses, master is always at [0]
 	refreshing bool                   // indicates if there's a refresh in progress
 }
 
-// Refresh updates the cluster's internal mapping of hash slots
-// to redis node. It calls CLUSTER SLOTS on each known node until one
-// of them succeeds.
+// Refresh updates the cluster's internal mapping of hash slots to redis node.
+// It calls CLUSTER SLOTS on each known node until one of them succeeds.
 //
-// It should typically be called after creating the Cluster and before
-// using it. The cluster automatically keeps its mapping up-to-date
-// afterwards, based on the redis commands' MOVED responses.
+// It should typically be called after creating the Cluster and before using
+// it. The cluster automatically keeps its mapping up-to-date afterwards, based
+// on the redis commands' MOVED responses.
 func (c *Cluster) Refresh() error {
 	c.mu.Lock()
 	err := c.err
@@ -115,6 +114,7 @@ func (c *Cluster) refresh() error {
 
 					// close and remove all existing pools for removed nodes
 					if p := c.pools[k]; p != nil {
+						// TODO: background error if pool.Close fails
 						p.Close()
 						delete(c.pools, k)
 					}
@@ -134,36 +134,38 @@ func (c *Cluster) refresh() error {
 	c.refreshing = false
 	c.mu.Unlock()
 
-	var sb strings.Builder
-	sb.WriteString("redisc: all nodes failed")
-	for _, msg := range errMsgs {
-		sb.WriteByte('\n')
-		sb.WriteString(msg)
-	}
-	return errors.New(sb.String())
+	// TODO: background error for refresh
+	msg := "redisc: all nodes failed\n"
+	msg += strings.Join(errMsgs, "\n")
+	return errors.New(msg)
 }
 
-// needsRefresh handles automatic update of the mapping.
+// needsRefresh handles automatic update of the mapping, either because no node
+// was found for the slot, or because a MOVED error was received.
 func (c *Cluster) needsRefresh(re *RedirError) {
 	c.mu.Lock()
 	if re != nil {
-		// update the mapping only if the address has changed, so that if
-		// a READONLY replica read returns a MOVED to a master, it doesn't
-		// overwrite that slot's replicas by setting just the master (i.e. this
-		// is not a MOVED because the cluster is updating, it is a MOVED
-		// because the replica cannot serve that key). Same goes for a request
-		// to a random connection that gets a MOVED, should not overwrite
-		// the moved-to slot's configuration if the master's address is the same.
+		// update the mapping only if the address has changed, so that if a
+		// READONLY replica read returns a MOVED to a master, it doesn't overwrite
+		// that slot's replicas by setting just the master (i.e. this is not a
+		// MOVED because the cluster is updating, it is a MOVED because the replica
+		// cannot serve that key). Same goes for a request to a random connection
+		// that gets a MOVED, should not overwrite the moved-to slot's
+		// configuration if the master's address is the same.
 		if current := c.mapping[re.NewSlot]; len(current) == 0 || current[0] != re.Addr {
 			c.mapping[re.NewSlot] = []string{re.Addr}
+		} else {
+			// no refresh needed, the mapping already points to this address
+			c.mu.Unlock()
+			return
 		}
 	}
 	if !c.refreshing {
-		// refreshing is reset to only once the goroutine has
-		// finished updating the mapping, so a new refresh goroutine
-		// will only be started if none is running.
+		// refreshing is reset only once the goroutine has finished updating the
+		// mapping, so a new refresh goroutine will only be started if none is
+		// running.
 		c.refreshing = true
-		go c.refresh()
+		go c.refresh() //nolint:errcheck
 	}
 	c.mu.Unlock()
 }
@@ -334,7 +336,7 @@ func (c *Cluster) getNodeAddrs(preferReplicas bool) []string {
 
 	// populate nodes lazily, only once
 	if c.masters == nil {
-		c.masters = make(map[string]bool)
+		c.masters = make(map[string]bool, len(c.StartupNodes))
 		c.replicas = make(map[string]bool)
 
 		// StartupNodes should be masters
@@ -358,10 +360,9 @@ func (c *Cluster) getNodeAddrs(preferReplicas bool) []string {
 	return addrs
 }
 
-// Dial returns a connection the same way as Get, but
-// it guarantees that the connection will not be managed by the
-// pool, even if CreatePool is set. The actual returned
-// type is *Conn, see its documentation for details.
+// Dial returns a connection the same way as Get, but it guarantees that the
+// connection will not be managed by the pool, even if CreatePool is set. The
+// actual returned type is *Conn, see its documentation for details.
 func (c *Cluster) Dial() (redis.Conn, error) {
 	c.mu.Lock()
 	err := c.err
@@ -377,10 +378,9 @@ func (c *Cluster) Dial() (redis.Conn, error) {
 	}, nil
 }
 
-// Get returns a redis.Conn interface that can be used to call
-// redis commands on the cluster. The application must close the
-// returned connection. The actual returned type is *Conn,
-// see its documentation for details.
+// Get returns a redis.Conn interface that can be used to call redis commands
+// on the cluster. The application must close the returned connection. The
+// actual returned type is *Conn, see its documentation for details.
 func (c *Cluster) Get() redis.Conn {
 	c.mu.Lock()
 	err := c.err
@@ -392,8 +392,8 @@ func (c *Cluster) Get() redis.Conn {
 	}
 }
 
-// Close releases the resources used by the cluster. It closes all the
-// pools that were created, if any.
+// Close releases the resources used by the cluster. It closes all the pools
+// that were created, if any.
 func (c *Cluster) Close() error {
 	c.mu.Lock()
 	err := c.err
@@ -410,16 +410,15 @@ func (c *Cluster) Close() error {
 	return err
 }
 
-// Stats returns the current statistics for all pools. Keys are node's addresses.
+// Stats returns the current statistics for all pools. Keys are node's
+// addresses.
 func (c *Cluster) Stats() map[string]redis.PoolStats {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	stats := make(map[string]redis.PoolStats, len(c.pools))
-
 	for address, pool := range c.pools {
 		stats[address] = pool.Stats()
 	}
-
 	return stats
 }
