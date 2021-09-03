@@ -1,6 +1,7 @@
 package redisc
 
 import (
+	"context"
 	"errors"
 	"math/rand"
 	"strconv"
@@ -296,6 +297,20 @@ func (c *Cluster) getConnForAddr(addr string, forceDial bool) (redis.Conn, error
 	c.mu.Unlock()
 
 	return c.getFromPool(p)
+}
+
+// get connection from the pool.
+// use GetContext if PoolWaitTime > 0
+func (c *Cluster) getFromPool(p *redis.Pool) (redis.Conn, error) {
+	if c.PoolWaitTime <= 0 {
+		conn := p.Get()
+		return conn, conn.Err()
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), c.PoolWaitTime)
+	defer cancel()
+
+	return p.GetContext(ctx)
 }
 
 var errNoNodeForSlot = errors.New("redisc: no node for slot")
