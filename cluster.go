@@ -491,15 +491,15 @@ func (c *Cluster) EachNode(replicas bool, fn func(addr string, conn redis.Conn) 
 
 	for _, addr := range addrs {
 		conn, err := c.getConnForAddr(addr, false)
-		if err != nil {
-			// create a failed connection and still call fn, so that it can decide
-			// whether or not to keep visiting nodes.
-			conn = &Conn{
-				cluster: c,
-				err:     err,
-			}
+		cconn := &Conn{
+			cluster:   c,
+			boundAddr: addr,
+			rc:        conn,
+			// in case of error, create a failed connection and still call fn, so
+			// that it can decide whether or not to keep visiting nodes.
+			err: err,
 		}
-		if err := fn(addr, conn); err != nil {
+		if err := fn(addr, cconn); err != nil {
 			return err
 		}
 	}

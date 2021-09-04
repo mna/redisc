@@ -341,7 +341,7 @@ func testLayoutMovedWithReplica(t *testing.T, ports []string) {
 	var count int64
 	done := make(chan bool, 1)
 	c := &Cluster{
-		StartupNodes: []string{ports[len(ports)-1]},
+		StartupNodes: []string{ports[0]},
 		LayoutRefresh: func(old, new [hashSlots][]string) {
 			for slot, maps := range old {
 				if slot == 15495 { // slot of key "a"
@@ -362,7 +362,20 @@ func testLayoutMovedWithReplica(t *testing.T, ports []string) {
 	conn := c.Get()
 	defer conn.Close()
 
-	_, _ = conn.Do("GET", "a")
+	// to trigger this properly, first do EachNode (which only knows about the
+	// current node, which serves the bottom tier slots), and request key "a"
+	// which hashes to a high slot. This will result in a MOVED error that will
+	// update the single mapping and trigger a full refresh.
+	var eachCalls int
+	_ = c.EachNode(false, func(_ string, conn redis.Conn) error {
+		eachCalls++
+		_, err := conn.Do("GET", "a")
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), "MOVED")
+		}
+		return nil
+	})
+	assert.Equal(t, 1, eachCalls)
 
 	// LayoutRefresh call might not have completed yet, so wait for the channel
 	// receive, or fail after a second.
