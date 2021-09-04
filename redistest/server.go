@@ -7,9 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -60,8 +58,8 @@ func StartClusterWithReplicas(t testing.TB, w io.Writer) (func(), []string) {
 	fn, ports := StartCluster(t, w)
 	mapping := getClusterNodeIDs(t, ports...)
 
-	var replicaPorts []string
-	var replicaCmds []*exec.Cmd
+	replicaPorts := make([]string, 0, len(ports))
+	replicaCmds := make([]*exec.Cmd, 0, len(ports))
 	replicaMaster := make(map[string]string)
 	for _, master := range ports {
 		port := getClusterFreePort(t)
@@ -83,13 +81,7 @@ func StartClusterWithReplicas(t testing.TB, w io.Writer) (func(), []string) {
 
 	return func() {
 		for _, c := range replicaCmds {
-			c.Process.Kill()
-		}
-		for _, port := range replicaPorts {
-			if strings.HasPrefix(port, ":") {
-				port = port[1:]
-			}
-			os.Remove(filepath.Join(os.TempDir(), fmt.Sprintf("nodes.%s.conf", port)))
+			_ = c.Process.Kill()
 		}
 		fn()
 	}, append(ports, replicaPorts...)
@@ -139,17 +131,12 @@ func StartCluster(t testing.TB, w io.Writer) (func(), []string) {
 
 	return func() {
 		for _, c := range cmds {
-			c.Process.Kill()
-		}
-		for _, port := range ports {
-			if strings.HasPrefix(port, ":") {
-				port = port[1:]
-			}
-			os.Remove(filepath.Join(os.TempDir(), fmt.Sprintf("nodes.%s.conf", port)))
+			_ = c.Process.Kill()
 		}
 	}, ports
 }
 
+//nolint:deadcode,unused
 func printClusterNodes(t testing.TB, port string) {
 	conn, err := redis.Dial("tcp", ":"+port)
 	require.NoError(t, err, "Dial to cluster node")
@@ -160,6 +147,7 @@ func printClusterNodes(t testing.TB, port string) {
 	fmt.Println(string(res.([]byte)))
 }
 
+//nolint:deadcode,unused
 func printClusterSlots(t testing.TB, port string) {
 	conn, err := redis.Dial("tcp", ":"+port)
 	require.NoError(t, err, "Dial to cluster node")
@@ -305,7 +293,7 @@ func startServerWithConfig(t testing.TB, port string, w io.Writer, conf string) 
 		args = []string{"-"}
 	}
 	c := exec.Command("redis-server", args...)
-	c.Dir = os.TempDir()
+	c.Dir = t.TempDir()
 
 	if w != nil {
 		c.Stderr = w
@@ -354,7 +342,7 @@ func getClusterFreePort(t testing.TB) string {
 }
 
 func getFreePort(t testing.TB) string {
-	l, err := net.Listen("tcp", ":0")
+	l, err := net.Listen("tcp", "127.0.0.1:0")
 	require.NoError(t, err, "listen on port 0")
 	defer l.Close()
 	_, p, err := net.SplitHostPort(l.Addr().String())
@@ -364,7 +352,7 @@ func getFreePort(t testing.TB) string {
 
 // NewPool creates a redis pool to return connections on the specified
 // addr.
-func NewPool(t testing.TB, addr string) *redis.Pool {
+func NewPool(_ testing.TB, addr string) *redis.Pool {
 	return &redis.Pool{
 		MaxIdle:     2,
 		MaxActive:   10,

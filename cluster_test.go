@@ -1,8 +1,10 @@
 package redisc
 
 import (
+	"context"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,54 +15,386 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestClusterRefreshNormalServer(t *testing.T) {
+func TestStandaloneRedis(t *testing.T) {
 	cmd, port := redistest.StartServer(t, nil, "")
-	defer cmd.Process.Kill()
+	defer cmd.Process.Kill() //nolint:errcheck
+	port = ":" + port
 
-	c := &Cluster{
-		StartupNodes: []string{":" + port},
+	t.Run("refresh", func(t *testing.T) {
+		c := &Cluster{
+			StartupNodes: []string{port},
+		}
+		err := c.Refresh()
+		if assert.Error(t, err, "Refresh") {
+			assert.Contains(t, err.Error(), "redisc: all nodes failed", "expected redisc error message")
+			assert.Contains(t, err.Error(), "cluster support disabled", "expected redis error message")
+		}
+	})
+}
+
+func TestClusterRedis(t *testing.T) {
+	fn, ports := redistest.StartCluster(t, nil)
+	defer fn()
+	for i, p := range ports {
+		ports[i] = ":" + p
 	}
-	err := c.Refresh()
-	if assert.Error(t, err, "Refresh") {
-		assert.Contains(t, err.Error(), "redisc: all nodes failed", "expected redisc error message")
-		assert.Contains(t, err.Error(), "cluster support disabled", "expected redis error message")
+
+	t.Run("refresh", func(t *testing.T) { testClusterRefresh(t, ports) })
+	t.Run("needs refresh", func(t *testing.T) { testClusterNeedsRefresh(t, ports) })
+	t.Run("close", func(t *testing.T) { testClusterClose(t, ports) })
+	t.Run("closed refresh", func(t *testing.T) { testClusterClosedRefresh(t, ports) })
+	t.Run("conn readonly no replica", func(t *testing.T) { testConnReadOnlyNoReplica(t, ports) })
+	t.Run("conn bind", func(t *testing.T) { testConnBind(t, ports) })
+	t.Run("conn blank do", func(t *testing.T) { testConnBlankDo(t, ports) })
+	t.Run("conn with timeout", func(t *testing.T) { testConnWithTimeout(t, ports) })
+	t.Run("retry conn too many attempts", func(t *testing.T) { testRetryConnTooManyAttempts(t, ports) })
+	t.Run("retry conn moved", func(t *testing.T) { testRetryConnMoved(t, ports) })
+	t.Run("each node none", func(t *testing.T) { testEachNodeNone(t, ports) })
+	t.Run("each node some", func(t *testing.T) { testEachNodeSome(t, ports) })
+}
+
+func TestClusterRedisWithReplica(t *testing.T) {
+	fn, ports := redistest.StartClusterWithReplicas(t, nil)
+	defer fn()
+	for i, p := range ports {
+		ports[i] = ":" + p
 	}
+
+	t.Run("refresh startup nodes a replica", func(t *testing.T) { testClusterRefreshStartWithReplica(t, ports) })
+	t.Run("conn readonly", func(t *testing.T) { testConnReadOnlyWithReplicas(t, ports) })
+	t.Run("each node some", func(t *testing.T) { testEachNodeSomeWithReplica(t, ports) })
+	t.Run("each node scan keys", func(t *testing.T) { testEachNodeScanKeysWithReplica(t, ports) })
+	t.Run("layout refresh", func(t *testing.T) { testLayoutRefreshWithReplica(t, ports) })
+	t.Run("layout moved", func(t *testing.T) { testLayoutMovedWithReplica(t, ports) })
 }
 
 func assertMapping(t *testing.T, mapping [hashSlots][]string, masterPorts, replicaPorts []string) {
-	var prev string
-	pix := -1
 	expectedMappingNodes := 1 // at least a master node
 	if len(replicaPorts) > 0 {
-		// if there are replicase, then we expected 2 mapping nodes (master+replica)
+		// if there are replicas, then we expected 2 mapping nodes (master+replica)
 		expectedMappingNodes = 2
 	}
-	for ix, maps := range mapping {
+	for _, maps := range mapping {
 		if assert.Equal(t, expectedMappingNodes, len(maps), "Mapping has %d node(s)", expectedMappingNodes) {
-			if maps[0] != prev || ix == len(mapping)-1 {
-				prev = maps[0]
-				t.Logf("%5d: %s\n", ix, maps[0])
-				pix++
-			}
 			if assert.NotEmpty(t, maps[0]) {
 				split := strings.Index(maps[0], ":")
-				assert.Contains(t, masterPorts, maps[0][split+1:], "expected master")
+				assert.Contains(t, masterPorts, maps[0][split:], "expected master")
 			}
 			if len(maps) > 1 && assert.NotEmpty(t, maps[1]) {
 				split := strings.Index(maps[1], ":")
-				assert.Contains(t, replicaPorts, maps[1][split+1:], "expected replica")
+				assert.Contains(t, replicaPorts, maps[1][split:], "expected replica")
 			}
 		}
 	}
 }
 
-func TestClusterRefresh(t *testing.T) {
-	fn, ports := redistest.StartCluster(t, nil)
-	defer fn()
+func testEachNodeNone(t *testing.T, _ []string) {
+	c := &Cluster{}
+	defer c.Close()
 
-	c := &Cluster{
-		StartupNodes: []string{":" + ports[0]},
+	// no known node
+	var count int
+	err := c.EachNode(false, func(addr string, conn redis.Conn) error {
+		count++
+		return nil
+	})
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), "no known node")
 	}
+	assert.Equal(t, 0, count)
+
+	// no known replica
+	count = 0
+	err = c.EachNode(true, func(addr string, conn redis.Conn) error {
+		count++
+		return nil
+	})
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), "no known node")
+	}
+	assert.Equal(t, 0, count)
+}
+
+func assertNodeIdentity(t *testing.T, conn redis.Conn, gotAddr, wantPort, wantRole string) {
+	assertNodeIdentityIn(t, conn, gotAddr, wantRole, map[string]bool{wantPort: true})
+}
+
+func assertNodeIdentityIn(t *testing.T, conn redis.Conn, gotAddr, wantRole string, portIn map[string]bool) {
+	var foundPort string
+	for port := range portIn {
+		if strings.HasSuffix(gotAddr, port) {
+			foundPort = port
+			delete(portIn, port)
+		}
+	}
+	assert.NotEmpty(t, foundPort, "address not in %#v", portIn)
+	vs, err := redis.Values(conn.Do("ROLE"))
+	require.NoError(t, err)
+
+	var role string
+	_, err = redis.Scan(vs, &role)
+	require.NoError(t, err)
+	assert.Equal(t, wantRole, role)
+
+	info, err := redis.String(conn.Do("INFO", "server"))
+	require.NoError(t, err)
+	assert.Contains(t, info, "tcp_port"+foundPort)
+}
+
+func testEachNodeSome(t *testing.T, ports []string) {
+	c := &Cluster{
+		StartupNodes: []string{ports[0]},
+	}
+	defer c.Close()
+
+	// only the single startup node at the moment
+	var count int
+	err := c.EachNode(false, func(addr string, conn redis.Conn) error {
+		count++
+		assertNodeIdentity(t, conn, addr, ports[0], "master")
+		return nil
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, 1, count)
+
+	// no known replica
+	count = 0
+	err = c.EachNode(true, func(addr string, conn redis.Conn) error {
+		count++
+		return nil
+	})
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), "no known node")
+	}
+	assert.Equal(t, 0, count)
+
+	require.NoError(t, c.Refresh())
+
+	portsIn := make(map[string]bool, len(ports))
+	for _, port := range ports {
+		portsIn[port] = true
+	}
+
+	count = 0
+	err = c.EachNode(false, func(addr string, conn redis.Conn) error {
+		count++
+		assertNodeIdentityIn(t, conn, addr, "master", portsIn)
+		return nil
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, len(ports), count)
+
+	// no known replica
+	count = 0
+	err = c.EachNode(true, func(addr string, conn redis.Conn) error {
+		count++
+		return nil
+	})
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), "no known node")
+	}
+	assert.Equal(t, 0, count)
+}
+
+func testEachNodeSomeWithReplica(t *testing.T, ports []string) {
+	c := &Cluster{
+		StartupNodes: []string{ports[0]},
+	}
+	defer c.Close()
+
+	// only the single startup node at the moment
+	var count int
+	err := c.EachNode(false, func(addr string, conn redis.Conn) error {
+		count++
+		assertNodeIdentity(t, conn, addr, ports[0], "master")
+		return nil
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, 1, count)
+
+	// no known replica
+	count = 0
+	err = c.EachNode(true, func(addr string, conn redis.Conn) error {
+		count++
+		return nil
+	})
+	if assert.Error(t, err) {
+		assert.Contains(t, err.Error(), "no known node")
+	}
+	assert.Equal(t, 0, count)
+
+	require.NoError(t, c.Refresh())
+
+	// visit each primary
+	primaries, replicas := ports[:redistest.NumClusterNodes], ports[redistest.NumClusterNodes:]
+	portsIn := make(map[string]bool, len(primaries))
+	for _, port := range primaries {
+		portsIn[port] = true
+	}
+
+	count = 0
+	err = c.EachNode(false, func(addr string, conn redis.Conn) error {
+		count++
+		assertNodeIdentityIn(t, conn, addr, "master", portsIn)
+		return nil
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, len(primaries), count)
+
+	// visit each replica
+	portsIn = make(map[string]bool, len(replicas))
+	for _, port := range replicas {
+		portsIn[port] = true
+	}
+
+	count = 0
+	err = c.EachNode(true, func(addr string, conn redis.Conn) error {
+		count++
+		assertNodeIdentityIn(t, conn, addr, "slave", portsIn)
+		return nil
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, len(replicas), count)
+}
+
+func testEachNodeScanKeysWithReplica(t *testing.T, ports []string) {
+	c := &Cluster{
+		StartupNodes: []string{ports[0]},
+	}
+	defer c.Close()
+	require.NoError(t, c.Refresh())
+
+	conn := c.Get()
+	conn, _ = RetryConn(conn, 3, 100*time.Millisecond)
+	defer conn.Close()
+
+	const prefix = "eachnode:"
+	keys := []string{"a", "b", "c", "d", "e"}
+	for i, k := range keys {
+		k = prefix + "{" + k + "}"
+		keys[i] = k
+		_, err := conn.Do("SET", k, i)
+		require.NoError(t, err)
+	}
+
+	// collect from primaries
+	var gotKeys []string
+	err := c.EachNode(false, func(addr string, conn redis.Conn) error {
+		var cursor int
+		for {
+			var keyList []string
+			vs, err := redis.Values(conn.Do("SCAN", cursor, "MATCH", prefix+"*"))
+			require.NoError(t, err)
+			_, err = redis.Scan(vs, &cursor, &keyList)
+			require.NoError(t, err)
+			gotKeys = append(gotKeys, keyList...)
+			if cursor == 0 {
+				return nil
+			}
+		}
+	})
+	require.NoError(t, err)
+	assert.ElementsMatch(t, keys, gotKeys)
+
+	// collect from replicas
+	gotKeys = nil
+	err = c.EachNode(true, func(addr string, conn redis.Conn) error {
+		var cursor int
+		for {
+			var keyList []string
+			vs, err := redis.Values(conn.Do("SCAN", cursor, "MATCH", prefix+"*"))
+			require.NoError(t, err)
+			_, err = redis.Scan(vs, &cursor, &keyList)
+			require.NoError(t, err)
+			gotKeys = append(gotKeys, keyList...)
+			if cursor == 0 {
+				return nil
+			}
+		}
+	})
+	require.NoError(t, err)
+	assert.ElementsMatch(t, keys, gotKeys)
+}
+
+func testLayoutRefreshWithReplica(t *testing.T, ports []string) {
+	var count int
+	c := &Cluster{
+		StartupNodes: []string{ports[0]},
+		LayoutRefresh: func(old, new [hashSlots][]string) {
+			for slot, maps := range old {
+				assert.Len(t, maps, 0, "slot %d", slot)
+			}
+			for slot, maps := range new {
+				assert.Len(t, maps, 2, "slot %d", slot)
+			}
+			count++
+		},
+	}
+	defer c.Close()
+
+	// LayoutRefresh is called synchronously when Refresh call is explicit
+	require.NoError(t, c.Refresh())
+	require.Equal(t, count, 1)
+}
+
+func testLayoutMovedWithReplica(t *testing.T, ports []string) {
+	var count int64
+	done := make(chan bool, 1)
+	c := &Cluster{
+		StartupNodes: []string{ports[0]},
+		LayoutRefresh: func(old, new [hashSlots][]string) {
+			for slot, maps := range old {
+				if slot == 15495 { // slot of key "a"
+					assert.Len(t, maps, 1, "slot %d", slot)
+					continue
+				}
+				assert.Len(t, maps, 0, "slot %d", slot)
+			}
+			for slot, maps := range new {
+				assert.Len(t, maps, 2, "slot %d", slot)
+			}
+			atomic.AddInt64(&count, 1)
+			done <- true
+		},
+	}
+	defer c.Close()
+
+	conn := c.Get()
+	defer conn.Close()
+
+	// to trigger this properly, first do EachNode (which only knows about the
+	// current node, which serves the bottom tier slots), and request key "a"
+	// which hashes to a high slot. This will result in a MOVED error that will
+	// update the single mapping and trigger a full refresh.
+	var eachCalls int
+	_ = c.EachNode(false, func(_ string, conn redis.Conn) error {
+		eachCalls++
+		_, err := conn.Do("GET", "a")
+		if assert.Error(t, err) {
+			assert.Contains(t, err.Error(), "MOVED")
+		}
+		return nil
+	})
+	assert.Equal(t, 1, eachCalls)
+
+	// LayoutRefresh call might not have completed yet, so wait for the channel
+	// receive, or fail after a second.
+	waitForClusterRefresh(c, nil)
+
+	select {
+	case <-time.After(time.Second):
+		require.Fail(t, "LayoutRefresh call not done after timeout")
+	case <-done:
+		count := atomic.LoadInt64(&count)
+		require.Equal(t, int(count), 1)
+	}
+}
+
+func testClusterRefresh(t *testing.T, ports []string) {
+	c := &Cluster{
+		StartupNodes: []string{ports[0]},
+	}
+	defer c.Close()
 
 	err := c.Refresh()
 	if assert.NoError(t, err, "Refresh") {
@@ -68,13 +402,12 @@ func TestClusterRefresh(t *testing.T) {
 	}
 }
 
-func TestClusterRefreshStartWithReplica(t *testing.T) {
-	fn, ports := redistest.StartClusterWithReplicas(t, nil)
-	defer fn()
-
+func testClusterRefreshStartWithReplica(t *testing.T, ports []string) {
 	c := &Cluster{
-		StartupNodes: []string{":" + ports[len(ports)-1]}, // last port is a replica
+		StartupNodes: []string{ports[len(ports)-1]}, // last port is a replica
 	}
+	defer c.Close()
+
 	err := c.Refresh()
 	if assert.NoError(t, err, "Refresh") {
 		assertMapping(t, c.mapping, ports[:redistest.NumClusterNodes], ports[redistest.NumClusterNodes:])
@@ -90,6 +423,8 @@ func TestClusterRefreshAllFail(t *testing.T) {
 	c := &Cluster{
 		StartupNodes: []string{s.Addr},
 	}
+	defer c.Close()
+
 	if err := c.Refresh(); assert.Error(t, err, "Refresh") {
 		assert.Contains(t, err.Error(), "all nodes failed", "expected message")
 		assert.Contains(t, err.Error(), "nope", "expected server message")
@@ -99,6 +434,8 @@ func TestClusterRefreshAllFail(t *testing.T) {
 
 func TestClusterNoNode(t *testing.T) {
 	c := &Cluster{}
+	defer c.Close()
+
 	conn := c.Get()
 	_, err := conn.Do("A")
 	if assert.Error(t, err, "Do") {
@@ -112,13 +449,7 @@ func TestClusterNoNode(t *testing.T) {
 	}
 }
 
-func TestClusterNeedsRefresh(t *testing.T) {
-	fn, ports := redistest.StartCluster(t, nil)
-	defer fn()
-
-	for i, p := range ports {
-		ports[i] = ":" + p
-	}
+func testClusterNeedsRefresh(t *testing.T, ports []string) {
 	c := &Cluster{
 		StartupNodes: ports,
 	}
@@ -138,30 +469,42 @@ func TestClusterNeedsRefresh(t *testing.T) {
 
 	// calling Do may or may not generate a MOVED error (it will get a
 	// random node, because no mapping is known yet)
-	conn.Do("GET", "b")
+	_, _ = conn.Do("GET", "b")
 
-	// wait for refreshing to become false again
-	c.mu.Lock()
-	for c.refreshing {
-		c.mu.Unlock()
-		time.Sleep(100 * time.Millisecond)
-		c.mu.Lock()
-	}
-	for i, v := range c.mapping {
-		if !assert.NotEmpty(t, v, "Addr for %d", i) {
-			break
+	waitForClusterRefresh(c, func() {
+		for i, v := range c.mapping {
+			if !assert.NotEmpty(t, v, "Addr for %d", i) {
+				break
+			}
 		}
-	}
-	c.mu.Unlock()
+	})
 }
 
-func TestClusterClose(t *testing.T) {
+func testClusterClose(t *testing.T, ports []string) {
 	c := &Cluster{
-		StartupNodes: []string{":6379"},
+		StartupNodes: []string{ports[0]},
 		DialOptions:  []redis.DialOption{redis.DialConnectTimeout(2 * time.Second)},
 		CreatePool:   createPool,
 	}
+	defer c.Close()
+
+	require.NoError(t, c.Refresh())
+
+	// get some connections before closing
+	connUnbound := c.Get()
+	defer connUnbound.Close()
+
+	connBound := c.Get()
+	defer connBound.Close()
+	_ = BindConn(connBound, "b")
+
+	connRetry := c.Get()
+	defer connRetry.Close()
+	connRetry, _ = RetryConn(connRetry, 3, time.Millisecond)
+
+	// close the cluster and check that all API works as expected
 	assert.NoError(t, c.Close(), "Close")
+
 	if err := c.Close(); assert.Error(t, err, "Close after Close") {
 		assert.Contains(t, err.Error(), "redisc: closed", "expected message")
 	}
@@ -174,6 +517,152 @@ func TestClusterClose(t *testing.T) {
 	if err := c.Refresh(); assert.Error(t, err, "Refresh after Close") {
 		assert.Contains(t, err.Error(), "redisc: closed", "expected message")
 	}
+	if err := c.EachNode(false, func(addr string, c redis.Conn) error { return c.Err() }); assert.Error(t, err, "EachNode after Close") {
+		assert.Contains(t, err.Error(), "redisc: closed", "expected message")
+	}
+
+	if _, err := connUnbound.Do("SET", "a", 1); assert.Error(t, err, "unbound connection Do") {
+		assert.Contains(t, err.Error(), "redisc: closed", "expected message")
+	}
+	// connection was bound pre-cluster-close, so it already has a valid connection
+	if _, err := connBound.Do("SET", "b", 1); assert.NoError(t, err, "bound connection Do") {
+		err = connBound.Close()
+		assert.NoError(t, err)
+	}
+	if _, err := connRetry.Do("GET", "a"); assert.Error(t, err, "retry connection Do") {
+		assert.Contains(t, err.Error(), "redisc: closed", "expected message")
+	}
+
+	// Stats still works after Close
+	stats := c.Stats()
+	assert.True(t, len(stats) > 0)
+}
+
+func testClusterClosedRefresh(t *testing.T, ports []string) {
+	var clusterRefreshCount int64
+	var clusterRefreshErr atomic.Value
+
+	done := make(chan bool)
+	c := &Cluster{
+		StartupNodes: []string{ports[0]},
+		DialOptions:  []redis.DialOption{redis.DialConnectTimeout(2 * time.Second)},
+		CreatePool:   createPool,
+		BgError: func(src BgErrorSrc, err error) {
+			if src == ClusterRefresh {
+				atomic.AddInt64(&clusterRefreshCount, 1)
+				clusterRefreshErr.Store(err)
+				done <- true
+			}
+		},
+	}
+	defer c.Close()
+
+	conn := c.Get()
+	defer conn.Close()
+
+	// close the cluster and check that all API works as expected
+	assert.NoError(t, c.Close(), "Close")
+	if _, err := conn.Do("SET", "a", 1); assert.Error(t, err, "connection Do") {
+		assert.Contains(t, err.Error(), "redisc: closed", "expected message")
+	}
+	waitForClusterRefresh(c, nil)
+
+	// BgError call might not have completed yet, so wait for the channel
+	// receive, or fail after a second.
+	select {
+	case <-time.After(time.Second):
+		require.Fail(t, "BgError call not done after timeout")
+	case <-done:
+		count := atomic.LoadInt64(&clusterRefreshCount)
+		require.Equal(t, int(count), 1)
+		if err := clusterRefreshErr.Load().(error); assert.Error(t, err, "refresh error") {
+			assert.Contains(t, err.Error(), "redisc: closed", "expected message")
+		}
+	}
+}
+
+// TestGetPoolTimedOut test case where we can't get the connection because the pool
+// is full
+func TestGetPoolTimedOut(t *testing.T) {
+	s := redistest.StartMockServer(t, func(cmd string, args ...string) interface{} {
+		return nil
+	})
+	defer s.Close()
+
+	p := &redis.Pool{
+		MaxActive: 1,
+		Dial: func() (redis.Conn, error) {
+			return redis.Dial("tcp", s.Addr)
+		},
+		Wait: true,
+	}
+	c := Cluster{
+		PoolWaitTime: 100 * time.Millisecond,
+	}
+	defer c.Close()
+
+	conn, err := c.getFromPool(p)
+	if assert.NoError(t, err) {
+		defer conn.Close()
+	}
+
+	// second connection should be failed because we only have 1 MaxActive
+	start := time.Now()
+	_, err = c.getFromPool(p)
+	if assert.Error(t, err) {
+		assert.Equal(t, context.DeadlineExceeded, err)
+		assert.True(t, time.Since(start) >= 100*time.Millisecond)
+	}
+}
+
+// TestGetPoolWaitOnFull test that we could get the connection when the pool
+// is full and we can wait for it
+func TestGetPoolWaitOnFull(t *testing.T) {
+	s := redistest.StartMockServer(t, func(cmd string, args ...string) interface{} {
+		return nil
+	})
+	defer s.Close()
+
+	var (
+		usageTime = 100 * time.Millisecond // how long the connection will be used
+		waitTime  = 3 * usageTime          // how long we want to wait
+	)
+
+	p := &redis.Pool{
+		MaxActive: 1,
+		Dial: func() (redis.Conn, error) {
+			return redis.Dial("tcp", s.Addr)
+		},
+		Wait: true,
+	}
+	c := Cluster{
+		PoolWaitTime: waitTime,
+	}
+	defer c.Close()
+
+	// first connection OK
+	conn, err := c.getFromPool(p)
+	assert.NoError(t, err)
+
+	// second connection should be failed because we only have 1 MaxActive
+	start := time.Now()
+	_, err = c.getFromPool(p)
+	if assert.Error(t, err) {
+		assert.Equal(t, context.DeadlineExceeded, err)
+		assert.True(t, time.Since(start) >= waitTime)
+	}
+
+	go func() {
+		time.Sleep(usageTime) // sleep before close, to simulate waiting for connection
+		conn.Close()
+	}()
+
+	start = time.Now()
+	conn2, err := c.getFromPool(p)
+	if assert.NoError(t, err) {
+		assert.True(t, time.Since(start) >= usageTime)
+	}
+	conn2.Close()
 }
 
 func createPool(addr string, opts ...redis.DialOption) (*redis.Pool, error) {
@@ -191,6 +680,24 @@ func createPool(addr string, opts ...redis.DialOption) (*redis.Pool, error) {
 	}, nil
 }
 
+// waits for a running Cluster.refresh call to complete before calling fn.
+// Note that fn is called while the Cluster's lock is held - to just wait
+// for refresh to complete and continue without holding the lock, simply
+// pass nil as fn - the lock is released before this call returns.
+func waitForClusterRefresh(cluster *Cluster, fn func()) {
+	// wait for refreshing to become false again
+	cluster.mu.Lock()
+	for cluster.refreshing {
+		cluster.mu.Unlock()
+		time.Sleep(100 * time.Millisecond)
+		cluster.mu.Lock()
+	}
+	if fn != nil {
+		fn()
+	}
+	cluster.mu.Unlock()
+}
+
 type redisCmd struct {
 	name   string
 	args   redis.Args
@@ -201,9 +708,6 @@ type redisCmd struct {
 type lenResult int
 
 func TestCommands(t *testing.T) {
-	fn, ports := redistest.StartCluster(t, nil)
-	defer fn()
-
 	cmdsPerGroup := map[string][]redisCmd{
 		"cluster": {
 			{"CLUSTER", redis.Args{"INFO"}, lenResult(10), ""},
@@ -245,6 +749,7 @@ func TestCommands(t *testing.T) {
 			{"PFMERGE", redis.Args{"hll", "hll2"}, nil, "CROSSSLOT"},
 		},
 		"keys": {
+			// connection will bind to the node that serves slot of "k1"
 			{"SET", redis.Args{"k1", "z"}, "OK", ""},
 			{"EXISTS", redis.Args{"k1"}, int64(1), ""},
 			{"DUMP", redis.Args{"k1"}, lenResult(10), ""},
@@ -263,8 +768,9 @@ func TestCommands(t *testing.T) {
 			{"TTL", redis.Args{"k1"}, lenResult(3000), ""},
 			{"TYPE", redis.Args{"k1"}, "string", ""},
 			{"DEL", redis.Args{"k1"}, int64(1), ""},
-			{"SADD", redis.Args{"k3", "a", "z", "d"}, int64(3), ""},
-			{"SORT", redis.Args{"k3", "ALPHA"}, []interface{}{[]byte("a"), []byte("d"), []byte("z")}, ""},
+			{"SADD", redis.Args{"k1", "a", "z", "d"}, int64(3), ""},
+			{"SORT", redis.Args{"k1", "ALPHA"}, []interface{}{[]byte("a"), []byte("d"), []byte("z")}, ""},
+			{"DEL", redis.Args{"a", "b"}, nil, "CROSSSLOT"},
 		},
 		"lists": {
 			{"LPUSH", redis.Args{"l1", "a", "b", "c"}, int64(3), ""},
@@ -312,8 +818,8 @@ func TestCommands(t *testing.T) {
 			{"SISMEMBER", redis.Args{"t1", "a"}, int64(1), ""},
 			{"SMEMBERS", redis.Args{"t1"}, lenResult(2), ""}, // order is not deterministic
 			{"SMOVE", redis.Args{"t1", "{t1}.c", "a"}, int64(1), ""},
-			{"SPOP", redis.Args{"t3"}, nil, ""},
-			{"SRANDMEMBER", redis.Args{"t3"}, nil, ""},
+			{"SPOP", redis.Args{"t3{t1}"}, nil, ""},
+			{"SRANDMEMBER", redis.Args{"t3{t1}"}, nil, ""},
 			{"SREM", redis.Args{"t1", "b"}, int64(1), ""},
 			{"SSCAN", redis.Args{"{t1}.b", 0}, lenResult(2), ""},
 			{"SUNION", redis.Args{"{t1}.b", "{t1}.c"}, lenResult(3), ""},
@@ -342,7 +848,8 @@ func TestCommands(t *testing.T) {
 			{"SET", redis.Args{"s{b}", "b"}, "OK", ""},
 			{"SET", redis.Args{"s{bcd}", "c"}, "OK", ""},
 			// keys "b" (3300) and "bcd" (1872) are both in a hash slot < 5000, so on same node for this test
-			// yet it still fails with CROSSSLOT.
+			// yet it still fails with CROSSSLOT (i.e. redis does not accept multi-key commands that don't
+			// strictly hash to the same slot, regardless of which host serves them).
 			{"MGET", redis.Args{"s{b}", "s{bcd}"}, "", "CROSSSLOT"},
 		},
 		"transactions": {
@@ -356,6 +863,9 @@ func TestCommands(t *testing.T) {
 		},
 	}
 
+	fn, ports := redistest.StartCluster(t, nil)
+	defer fn()
+
 	for i, p := range ports {
 		ports[i] = ":" + p
 	}
@@ -364,6 +874,8 @@ func TestCommands(t *testing.T) {
 		DialOptions:  []redis.DialOption{redis.DialConnectTimeout(2 * time.Second)},
 		CreatePool:   createPool,
 	}
+	defer c.Close()
+
 	require.NoError(t, c.Refresh(), "Refresh")
 
 	var wg sync.WaitGroup
@@ -393,9 +905,7 @@ func runTransactionsCommands(t *testing.T, c *Cluster, wg *sync.WaitGroup) {
 
 	conn := c.Get()
 	defer conn.Close()
-	if conn, ok := conn.(*Conn); ok {
-		require.NoError(t, conn.Bind("tr{a}1", "tr{a}2"), "Bind")
-	}
+	require.NoError(t, BindConn(conn, "tr{a}1", "tr{a}2"), "Bind")
 
 	_, err := conn.Do("WATCH", "tr{a}1")
 	assert.NoError(t, err, "WATCH")

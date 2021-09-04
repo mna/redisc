@@ -13,22 +13,20 @@ import (
 
 var _ redis.ConnWithTimeout = (*Conn)(nil)
 
-// Conn is a redis cluster connection. When returned by Get
-// or Dial, it is not yet bound to any node in the cluster.
-// Only when a call to Do, Send, Receive or Bind is made is a connection
-// to a specific node established:
+// Conn is a redis cluster connection. When returned by Get or Dial, it is not
+// yet bound to any node in the cluster.  Only when a call to Do, Send, Receive
+// or Bind is made is a connection to a specific node established:
 //
-//     - if Do or Send is called first, the command's first parameter
-//       is assumed to be the key, and its slot is used to find the node
-//     - if Receive is called first, or if Do or Send is called first
-//       but with no parameter for the command (or no command), a
-//       random node is selected in the cluster
-//     - if Bind is called first, the node corresponding to the slot of
-//       the specified key(s) is selected
+//     - if Do or Send is called first, the command's first parameter is
+//     assumed to be the key, and its slot is used to find the node
+//     - if Receive is called first, or if Do or Send is called first but with
+//     no parameter for the command (or no command), a random node is selected
+//     in the cluster
+//     - if Bind is called first, the node corresponding to the slot of the
+//     specified key(s) is selected
 //
-// Because Get and Dial return a redis.Conn interface,
-// a type assertion can be used to call Bind or ReadOnly on this
-// concrete Conn type:
+// Because Get and Dial return a redis.Conn interface, a type assertion can be
+// used to call Bind or ReadOnly on this concrete Conn type:
 //
 //     redisConn := cluster.Get()
 //     if conn, ok := redisConn.(*redisc.Conn); ok {
@@ -37,15 +35,14 @@ var _ redis.ConnWithTimeout = (*Conn)(nil)
 //       }
 //     }
 //
-// Or call the package-level BindConn or ReadOnlyConn helper functions.
-//
+// Alternatively, the package-level BindConn or ReadOnlyConn helper functions
+// may be used.
 type Conn struct {
-	cluster   *Cluster
-	forceDial bool // immutable
+	cluster   *Cluster // immutable
+	forceDial bool     // immutable
 
 	// redigo allows concurrent reader and writer (conn.Receive and
-	// conn.Send/conn.Flush), a mutex is needed to protect concurrent
-	// accesses.
+	// conn.Send/conn.Flush), a mutex is needed to protect concurrent accesses.
 	mu        sync.Mutex
 	readOnly  bool
 	boundAddr string
@@ -53,9 +50,8 @@ type Conn struct {
 	rc        redis.Conn
 }
 
-// RedirError is a cluster redirection error. It indicates that
-// the redis node returned either a MOVED or an ASK error, as
-// specified by the Type field.
+// RedirError is a cluster redirection error. It indicates that the redis node
+// returned either a MOVED or an ASK error, as specified by the Type field.
 type RedirError struct {
 	// Type indicates if the redirection is a MOVED or an ASK.
 	Type string
@@ -67,8 +63,8 @@ type RedirError struct {
 	raw string
 }
 
-// Error returns the error message of a RedirError. This is the
-// message as received from redis.
+// Error returns the error message of a RedirError. This is the message as
+// received from redis.
 func (e *RedirError) Error() string {
 	return e.raw
 }
@@ -82,23 +78,21 @@ func isRedisErr(err error, typ string) bool {
 	return len(parts) > 0 && parts[0] == typ
 }
 
-// IsTryAgain returns true if the error is a redis cluster
-// error of type TRYAGAIN, meaning that the command is valid,
-// but the cluster is in an unstable state and it can't complete
-// the request at the moment.
+// IsTryAgain returns true if the error is a redis cluster error of type
+// TRYAGAIN, meaning that the command is valid, but the cluster is in an
+// unstable state and it can't complete the request at the moment.
 func IsTryAgain(err error) bool {
 	return isRedisErr(err, "TRYAGAIN")
 }
 
-// IsCrossSlot returns true if the error is a redis cluster
-// error of type CROSSSLOT, meaning that a command was sent
-// with keys from different slots.
+// IsCrossSlot returns true if the error is a redis cluster error of type
+// CROSSSLOT, meaning that a command was sent with keys from different slots.
 func IsCrossSlot(err error) bool {
 	return isRedisErr(err, "CROSSSLOT")
 }
 
-// ParseRedir parses err into a RedirError. If err is
-// not a MOVED or ASK error or if it is nil, it returns nil.
+// ParseRedir parses err into a RedirError. If err is not a MOVED or ASK error
+// or if it is nil, it returns nil.
 func ParseRedir(err error) *RedirError {
 	re, ok := err.(redis.Error)
 	if !ok {
@@ -120,10 +114,10 @@ func ParseRedir(err error) *RedirError {
 	}
 }
 
-// binds the connection to a specific node, the one holding the slot
-// or a random node if slot is -1, iff the connection is not broken
-// and is not already bound. It returns the redis conn, true if it
-// successfully bound to this slot, or any error.
+// binds the connection to a specific node, the one holding the slot or a
+// random node if slot is -1, iff the connection is not broken and is not
+// already bound. It returns the redis conn, true if it successfully bound to
+// this slot, or any error.
 func (c *Conn) bind(slot int) (rc redis.Conn, ok bool, err error) {
 	c.mu.Lock()
 	rc, err = c.rc, c.err
@@ -143,7 +137,7 @@ func (c *Conn) bind(slot int) (rc redis.Conn, ok bool, err error) {
 	return rc, ok, err
 }
 
-func cmdSlot(cmd string, args []interface{}) int {
+func cmdSlot(_ string, args []interface{}) int {
 	slot := -1
 	if len(args) > 0 {
 		key := fmt.Sprintf("%s", args[0])
@@ -152,10 +146,9 @@ func cmdSlot(cmd string, args []interface{}) int {
 	return slot
 }
 
-// BindConn is a convenience function that checks if c implements
-// a Bind method with the right signature such as the one for
-// a *Conn, and calls that method. If c doesn't implement that
-// method, it returns an error.
+// BindConn is a convenience function that checks if c implements a Bind method
+// with the right signature such as the one for a *Conn, and calls that method.
+// If c doesn't implement that method, it returns an error.
 func BindConn(c redis.Conn, keys ...string) error {
 	if cc, ok := c.(interface {
 		Bind(...string) error
@@ -165,11 +158,11 @@ func BindConn(c redis.Conn, keys ...string) error {
 	return errors.New("redisc: no Bind method")
 }
 
-// Bind binds the connection to the cluster node corresponding to
-// the slot of the provided keys. If the keys don't belong to the
-// same slot, an error is returned and the connection is not bound.
-// If the connection is already bound, an error is returned.
-// If no key is provided, it binds to a random node.
+// Bind binds the connection to the cluster node corresponding to the slot of
+// the provided keys. If the keys don't belong to the same slot, an error is
+// returned and the connection is not bound.  If the connection is already
+// bound, an error is returned.  If no key is provided, it binds to a random
+// node.
 func (c *Conn) Bind(keys ...string) error {
 	slot := -1
 	for _, k := range keys {
@@ -191,10 +184,9 @@ func (c *Conn) Bind(keys ...string) error {
 	return nil
 }
 
-// ReadOnlyConn is a convenience function that checks if c implements
-// a ReadOnly method with the right signature such as the one for
-// a *Conn, and calls that method. If c doesn't implement that
-// method, it returns an error.
+// ReadOnlyConn is a convenience function that checks if c implements a
+// ReadOnly method with the right signature such as the one for a *Conn, and
+// calls that method. If c doesn't implement that method, it returns an error.
 func ReadOnlyConn(c redis.Conn) error {
 	if cc, ok := c.(interface {
 		ReadOnly() error
@@ -204,16 +196,16 @@ func ReadOnlyConn(c redis.Conn) error {
 	return errors.New("redisc: no ReadOnly method")
 }
 
-// ReadOnly marks the connection as read-only, meaning that when it is
-// bound to a cluster node, it will attempt to connect to a replica instead
-// of the master and will automatically emit a READONLY command so that
-// the replica agrees to serve read commands. Be aware that reading
-// from a replica may return stale data. Sending write commands on a
-// read-only connection will fail with a MOVED error.
-// See http://redis.io/commands/readonly for more details.
+// ReadOnly marks the connection as read-only, meaning that when it is bound to
+// a cluster node, it will attempt to connect to a replica instead of the
+// master and will automatically emit a READONLY command so that the replica
+// agrees to serve read commands. Be aware that reading from a replica may
+// return stale data. Sending write commands on a read-only connection will
+// fail with a MOVED error.  See http://redis.io/commands/readonly for more
+// details.
 //
-// If the connection is already bound to a node, either via a call to
-// Do, Send, Receive or Bind, ReadOnly returns an error.
+// If the connection is already bound to a node, either via a call to Do, Send,
+// Receive or Bind, ReadOnly returns an error.
 func (c *Conn) ReadOnly() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -229,23 +221,23 @@ func (c *Conn) ReadOnly() error {
 	return nil
 }
 
-// Do sends a command to the server and returns the received reply.
-// If the connection is not yet bound to a cluster node, it will be
-// after this call, based on the rules documented in the Conn type.
+// Do sends a command to the server and returns the received reply.  If the
+// connection is not yet bound to a cluster node, it will be after this call,
+// based on the rules documented in the Conn type.
 func (c *Conn) Do(cmd string, args ...interface{}) (interface{}, error) {
 	return c.DoWithTimeout(-1, cmd, args...)
 }
 
 // DoWithTimeout sends a command to the server and returns the received reply.
-// If the connection is not yet bound to a cluster node, it will be
-// after this call, based on the rules documented in the Conn type.
+// If the connection is not yet bound to a cluster node, it will be after this
+// call, based on the rules documented in the Conn type.
 //
-// The timeout overrides the read timeout set when dialing the
-// connection (in the DialOptions of the Cluster).
+// The timeout overrides the read timeout set when dialing the connection (in
+// the DialOptions of the Cluster).
 func (c *Conn) DoWithTimeout(timeout time.Duration, cmd string, args ...interface{}) (v interface{}, err error) {
 	// The blank command is a special redigo/redis command that flushes the
 	// output buffer and receives all pending replies. This is used, for example,
-	// when returning a Redis conneciton back to the pool. If we recieve the
+	// when returning a Redis connection back to the pool. If we receive the
 	// blank command, don't bind to a random node if this connection is not bound
 	// yet.
 	if cmd == "" && len(args) == 0 {
@@ -277,9 +269,9 @@ func (c *Conn) DoWithTimeout(timeout time.Duration, cmd string, args ...interfac
 	return v, err
 }
 
-// Send writes the command to the client's output buffer. If the
-// connection is not yet bound to a cluster node, it will be after
-// this call, based on the rules documented in the Conn type.
+// Send writes the command to the client's output buffer. If the connection is
+// not yet bound to a cluster node, it will be after this call, based on the
+// rules documented in the Conn type.
 func (c *Conn) Send(cmd string, args ...interface{}) error {
 	rc, _, err := c.bind(cmdSlot(cmd, args))
 	if err != nil {
@@ -288,19 +280,19 @@ func (c *Conn) Send(cmd string, args ...interface{}) error {
 	return rc.Send(cmd, args...)
 }
 
-// Receive receives a single reply from the server. If the connection
-// is not yet bound to a cluster node, it will be after this call,
-// based on the rules documented in the Conn type.
+// Receive receives a single reply from the server. If the connection is not
+// yet bound to a cluster node, it will be after this call, based on the rules
+// documented in the Conn type.
 func (c *Conn) Receive() (interface{}, error) {
 	return c.ReceiveWithTimeout(-1)
 }
 
-// ReceiveWithTimeout receives a single reply from the Redis server.
-// If the connection is not yet bound to a cluster node, it will be
-// after this call, based on the rules documented in the Conn type.
+// ReceiveWithTimeout receives a single reply from the Redis server.  If the
+// connection is not yet bound to a cluster node, it will be after this call,
+// based on the rules documented in the Conn type.
 //
-// The timeout overrides the read timeout set when dialing the
-// connection (in the DialOptions of the Cluster).
+// The timeout overrides the read timeout set when dialing the connection (in
+// the DialOptions of the Cluster).
 func (c *Conn) ReceiveWithTimeout(timeout time.Duration) (v interface{}, err error) {
 	rc, _, err := c.bind(-1)
 	if err != nil {
@@ -361,7 +353,7 @@ func (c *Conn) closeLocked() (err error) {
 	if c.rc != nil {
 		// this may be a pooled connection, so make sure the readOnly flag is reset
 		if c.readOnly {
-			c.rc.Do("READWRITE")
+			_, _ = c.rc.Do("READWRITE")
 		}
 		err = c.rc.Close()
 	}
