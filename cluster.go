@@ -68,7 +68,7 @@ type Cluster struct {
 	// refresh is successfully executed, either by an explicit call to
 	// Cluster.Refresh or e.g.  as required following a MOVED error. Note that
 	// even though it is unlikely, the old and new mappings could be identical.
-	// The function is called in a separate goroutine, it should not access
+	// The function may be called in a separate goroutine, it should not access
 	// shared values that are not meant to be used concurrently.
 	LayoutRefresh func(old, new [hashSlots][]string)
 
