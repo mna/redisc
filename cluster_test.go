@@ -749,6 +749,7 @@ func TestCommands(t *testing.T) {
 			{"PFMERGE", redis.Args{"hll", "hll2"}, nil, "CROSSSLOT"},
 		},
 		"keys": {
+			// connection will bind to the node that serves slot of "k1"
 			{"SET", redis.Args{"k1", "z"}, "OK", ""},
 			{"EXISTS", redis.Args{"k1"}, int64(1), ""},
 			{"DUMP", redis.Args{"k1"}, lenResult(10), ""},
@@ -767,8 +768,8 @@ func TestCommands(t *testing.T) {
 			{"TTL", redis.Args{"k1"}, lenResult(3000), ""},
 			{"TYPE", redis.Args{"k1"}, "string", ""},
 			{"DEL", redis.Args{"k1"}, int64(1), ""},
-			{"SADD", redis.Args{"k3", "a", "z", "d"}, int64(3), ""},
-			{"SORT", redis.Args{"k3", "ALPHA"}, []interface{}{[]byte("a"), []byte("d"), []byte("z")}, ""},
+			{"SADD", redis.Args{"k1", "a", "z", "d"}, int64(3), ""},
+			{"SORT", redis.Args{"k1", "ALPHA"}, []interface{}{[]byte("a"), []byte("d"), []byte("z")}, ""},
 			{"DEL", redis.Args{"a", "b"}, nil, "CROSSSLOT"},
 		},
 		"lists": {
