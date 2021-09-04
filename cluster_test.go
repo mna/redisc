@@ -905,9 +905,7 @@ func runTransactionsCommands(t *testing.T, c *Cluster, wg *sync.WaitGroup) {
 
 	conn := c.Get()
 	defer conn.Close()
-	if conn, ok := conn.(*Conn); ok {
-		require.NoError(t, conn.Bind("tr{a}1", "tr{a}2"), "Bind")
-	}
+	require.NoError(t, BindConn(conn, "tr{a}1", "tr{a}2"), "Bind")
 
 	_, err := conn.Do("WATCH", "tr{a}1")
 	assert.NoError(t, err, "WATCH")
