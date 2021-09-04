@@ -57,7 +57,9 @@
 // Along with some additional methods specific to a cluster:
 //
 //     Dial() (redis.Conn, error)
+//     EachNode(bool, func(string, redis.Conn) error) error
 //     Refresh() error
+//     Stats() map[string]redis.PoolStats
 //
 // If the CreatePool function field is set, then a
 // redis.Pool is created to manage connections to each of the
@@ -77,6 +79,14 @@
 // the first connections already benefit from smart routing.
 // It is automatically kept up-to-date based on the redis MOVED
 // responses afterwards.
+//
+// The EachNode method visits each node in the cluster and calls
+// the provided function with a connection to that node, which may
+// be useful to run diagnostics commands on each node or to collect
+// keys across the whole cluster.
+//
+// The Stats method returns the pool statistics for each node, with
+// the node's address as key of the map.
 //
 // A cluster must be closed once it is no longer used to release
 // its resources.
