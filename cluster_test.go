@@ -259,7 +259,8 @@ func testEachNodeSomeWithReplica(t *testing.T, ports []string) {
 
 func testEachNodeScanKeysWithReplica(t *testing.T, ports []string) {
 	c := &Cluster{
-		StartupNodes: []string{ports[0]},
+		StartupNodes: []string{"127.0.0.1" + ports[0]},
+		CreatePool:   createPool,
 	}
 	defer c.Close()
 	require.NoError(t, c.Refresh())
@@ -276,6 +277,7 @@ func testEachNodeScanKeysWithReplica(t *testing.T, ports []string) {
 		_, err := conn.Do("SET", k, i)
 		require.NoError(t, err)
 	}
+	conn.Close() // close it now so it does not show up as in use in stats
 
 	// collect from primaries
 	var gotKeys []string
@@ -314,6 +316,15 @@ func testEachNodeScanKeysWithReplica(t *testing.T, ports []string) {
 	})
 	require.NoError(t, err)
 	assert.ElementsMatch(t, keys, gotKeys)
+
+	var inuse, idle int
+	stats := c.Stats()
+	for _, st := range stats {
+		inuse += st.ActiveCount - st.IdleCount
+		idle += st.IdleCount
+	}
+	assert.Equal(t, 0, inuse)         // all connections were closed/returned to the pool
+	assert.Equal(t, len(ports), idle) // one for each node, primary + replica
 }
 
 func testLayoutRefreshWithReplica(t *testing.T, ports []string) {

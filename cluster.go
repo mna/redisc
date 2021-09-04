@@ -499,7 +499,11 @@ func (c *Cluster) EachNode(replicas bool, fn func(addr string, conn redis.Conn) 
 			// that it can decide whether or not to keep visiting nodes.
 			err: err,
 		}
-		if err := fn(addr, cconn); err != nil {
+		err = func() error {
+			defer cconn.Close()
+			return fn(addr, cconn)
+		}()
+		if err != nil {
 			return err
 		}
 	}
