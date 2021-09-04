@@ -341,7 +341,7 @@ func testLayoutMovedWithReplica(t *testing.T, ports []string) {
 	var count int64
 	done := make(chan bool, 1)
 	c := &Cluster{
-		StartupNodes: []string{ports[0]},
+		StartupNodes: []string{ports[6]},
 		LayoutRefresh: func(old, new [hashSlots][]string) {
 			for slot, maps := range old {
 				if slot == 15495 { // slot of key "a"
