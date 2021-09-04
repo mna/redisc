@@ -32,8 +32,6 @@ func TestStandaloneRedis(t *testing.T) {
 	})
 }
 
-// TODO: test LayoutChange calls
-
 func TestClusterRedis(t *testing.T) {
 	fn, ports := redistest.StartCluster(t, nil)
 	defer fn()
@@ -66,23 +64,18 @@ func TestClusterRedisWithReplica(t *testing.T) {
 	t.Run("conn readonly", func(t *testing.T) { testConnReadOnlyWithReplicas(t, ports) })
 	t.Run("each node some", func(t *testing.T) { testEachNodeSomeWithReplica(t, ports) })
 	t.Run("each node scan keys", func(t *testing.T) { testEachNodeScanKeysWithReplica(t, ports) })
+	t.Run("layout refresh", func(t *testing.T) { testLayoutRefreshWithReplica(t, ports) })
+	t.Run("layout moved", func(t *testing.T) { testLayoutMovedWithReplica(t, ports) })
 }
 
 func assertMapping(t *testing.T, mapping [hashSlots][]string, masterPorts, replicaPorts []string) {
-	var prev string
-	pix := -1
 	expectedMappingNodes := 1 // at least a master node
 	if len(replicaPorts) > 0 {
 		// if there are replicas, then we expected 2 mapping nodes (master+replica)
 		expectedMappingNodes = 2
 	}
-	for ix, maps := range mapping {
+	for _, maps := range mapping {
 		if assert.Equal(t, expectedMappingNodes, len(maps), "Mapping has %d node(s)", expectedMappingNodes) {
-			if maps[0] != prev || ix == len(mapping)-1 {
-				prev = maps[0]
-				t.Logf("%5d: %s\n", ix, maps[0])
-				pix++
-			}
 			if assert.NotEmpty(t, maps[0]) {
 				split := strings.Index(maps[0], ":")
 				assert.Contains(t, masterPorts, maps[0][split:], "expected master")
@@ -321,6 +314,67 @@ func testEachNodeScanKeysWithReplica(t *testing.T, ports []string) {
 	})
 	require.NoError(t, err)
 	assert.ElementsMatch(t, keys, gotKeys)
+}
+
+func testLayoutRefreshWithReplica(t *testing.T, ports []string) {
+	var count int
+	c := &Cluster{
+		StartupNodes: []string{ports[0]},
+		LayoutRefresh: func(old, new [hashSlots][]string) {
+			for slot, maps := range old {
+				assert.Len(t, maps, 0, "slot %d", slot)
+			}
+			for slot, maps := range new {
+				assert.Len(t, maps, 2, "slot %d", slot)
+			}
+			count++
+		},
+	}
+	defer c.Close()
+
+	// LayoutRefresh is called synchronously when Refresh call is explicit
+	require.NoError(t, c.Refresh())
+	require.Equal(t, count, 1)
+}
+
+func testLayoutMovedWithReplica(t *testing.T, ports []string) {
+	var count int64
+	done := make(chan bool, 1)
+	c := &Cluster{
+		StartupNodes: []string{ports[0]},
+		LayoutRefresh: func(old, new [hashSlots][]string) {
+			for slot, maps := range old {
+				if slot == 15495 { // slot of key "a"
+					assert.Len(t, maps, 1, "slot %d", slot)
+					continue
+				}
+				assert.Len(t, maps, 0, "slot %d", slot)
+			}
+			for slot, maps := range new {
+				assert.Len(t, maps, 2, "slot %d", slot)
+			}
+			atomic.AddInt64(&count, 1)
+			done <- true
+		},
+	}
+	defer c.Close()
+
+	conn := c.Get()
+	defer conn.Close()
+
+	_, _ = conn.Do("GET", "a")
+
+	// LayoutRefresh call might not have completed yet, so wait for the channel
+	// receive, or fail after a second.
+	waitForClusterRefresh(c, nil)
+
+	select {
+	case <-time.After(time.Second):
+		require.Fail(t, "LayoutRefresh call not done after timeout")
+	case <-done:
+		count := atomic.LoadInt64(&count)
+		require.Equal(t, int(count), 1)
+	}
 }
 
 func testClusterRefresh(t *testing.T, ports []string) {

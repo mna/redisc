@@ -68,6 +68,8 @@ type Cluster struct {
 	// refresh is successfully executed, either by an explicit call to
 	// Cluster.Refresh or e.g.  as required following a MOVED error. Note that
 	// even though it is unlikely, the old and new mappings could be identical.
+	// The function is called in a separate goroutine, it should not access
+	// shared values that are not meant to be used concurrently.
 	LayoutRefresh func(old, new [hashSlots][]string)
 
 	mu         sync.RWMutex           // protects following fields
@@ -101,6 +103,7 @@ func (c *Cluster) Refresh() error {
 
 func (c *Cluster) refresh(bg bool) error {
 	var errMsgs []string
+	var oldm, newm [hashSlots][]string
 
 	addrs, _ := c.getNodeAddrs(false)
 	for _, addr := range addrs {
@@ -112,6 +115,8 @@ func (c *Cluster) refresh(bg bool) error {
 
 		// succeeded, save as mapping
 		c.mu.Lock()
+
+		oldm = c.mapping
 		// mark all current nodes as false
 		for k := range c.masters {
 			c.masters[k] = false
@@ -120,7 +125,6 @@ func (c *Cluster) refresh(bg bool) error {
 			c.replicas[k] = false
 		}
 
-		// TODO: keep old/new mappings to call LayoutRefresh after
 		for _, sm := range m {
 			for i, node := range sm.nodes {
 				if node != "" {
@@ -154,7 +158,12 @@ func (c *Cluster) refresh(bg bool) error {
 
 		// mark that no refresh is needed until another MOVED
 		c.refreshing = false
+		newm = c.mapping
 		c.mu.Unlock()
+
+		if c.LayoutRefresh != nil {
+			c.LayoutRefresh(oldm, newm)
+		}
 
 		return nil
 	}

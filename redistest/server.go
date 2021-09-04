@@ -7,9 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -85,10 +83,6 @@ func StartClusterWithReplicas(t testing.TB, w io.Writer) (func(), []string) {
 		for _, c := range replicaCmds {
 			_ = c.Process.Kill()
 		}
-		for _, port := range replicaPorts {
-			port = strings.TrimPrefix(port, ":")
-			os.Remove(filepath.Join(os.TempDir(), fmt.Sprintf("nodes.%s.conf", port)))
-		}
 		fn()
 	}, append(ports, replicaPorts...)
 }
@@ -138,10 +132,6 @@ func StartCluster(t testing.TB, w io.Writer) (func(), []string) {
 	return func() {
 		for _, c := range cmds {
 			_ = c.Process.Kill()
-		}
-		for _, port := range ports {
-			port = strings.TrimPrefix(port, ":")
-			os.Remove(filepath.Join(os.TempDir(), fmt.Sprintf("nodes.%s.conf", port)))
 		}
 	}, ports
 }
@@ -303,7 +293,7 @@ func startServerWithConfig(t testing.TB, port string, w io.Writer, conf string) 
 		args = []string{"-"}
 	}
 	c := exec.Command("redis-server", args...)
-	c.Dir = os.TempDir()
+	c.Dir = t.TempDir()
 
 	if w != nil {
 		c.Stderr = w
