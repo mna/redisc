@@ -13,7 +13,7 @@ func Slot(key string) int {
 			key = key[start+1 : end]
 		}
 	}
-	return int(crc16(key) % hashSlots)
+	return int(crc16(key) % HashSlots)
 }
 
 // SplitBySlot takes a list of keys and returns a list of list of keys,

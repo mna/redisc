@@ -12,7 +12,8 @@ import (
 	"github.com/gomodule/redigo/redis"
 )
 
-const hashSlots = 16384
+// HashSlots is the number of slots supported by redis cluster.
+const HashSlots = 16384
 
 // BgErrorSrc identifies the origin of a background error as reported by calls
 // to Cluster.BgError, when set.
@@ -70,14 +71,14 @@ type Cluster struct {
 	// even though it is unlikely, the old and new mappings could be identical.
 	// The function may be called in a separate goroutine, it should not access
 	// shared values that are not meant to be used concurrently.
-	LayoutRefresh func(old, new [hashSlots][]string)
+	LayoutRefresh func(old, new [HashSlots][]string)
 
 	mu         sync.RWMutex           // protects following fields
 	err        error                  // closed cluster error
 	pools      map[string]*redis.Pool // created pools per node address
 	masters    map[string]bool        // set of known active master nodes addresses, kept up-to-date
 	replicas   map[string]bool        // set of known active replica nodes addresses, kept up-to-date
-	mapping    [hashSlots][]string    // hash slot number to master and replica(s) addresses, master is always at [0]
+	mapping    [HashSlots][]string    // hash slot number to master and replica(s) addresses, master is always at [0]
 	refreshing bool                   // indicates if there's a refresh in progress
 }
 
@@ -103,7 +104,7 @@ func (c *Cluster) Refresh() error {
 
 func (c *Cluster) refresh(bg bool) error {
 	var errMsgs []string
-	var oldm, newm [hashSlots][]string
+	var oldm, newm [HashSlots][]string
 
 	addrs, _ := c.getNodeAddrs(false)
 	for _, addr := range addrs {

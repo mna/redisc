@@ -3,6 +3,7 @@ package redisc
 import (
 	"net"
 	"strconv"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -28,7 +29,7 @@ func TestRetryConnAsk(t *testing.T) {
 			nPort, _ := strconv.Atoi(port)
 			// reply that all slots are served by this server
 			return resp.Array{
-				0: resp.Array{0: int64(0), 1: int64(hashSlots - 1), 2: resp.Array{0: addr, 1: int64(nPort)}},
+				0: resp.Array{0: int64(0), 1: int64(HashSlots - 1), 2: resp.Array{0: addr, 1: int64(nPort)}},
 			}
 
 		case "GET":
@@ -90,7 +91,7 @@ func TestRetryConnAskDistinctServers(t *testing.T) {
 			nPort, _ := strconv.Atoi(port)
 			// reply that all slots are served by this server
 			return resp.Array{
-				0: resp.Array{0: int64(0), 1: int64(hashSlots - 1), 2: resp.Array{0: addr, 1: int64(nPort)}},
+				0: resp.Array{0: int64(0), 1: int64(HashSlots - 1), 2: resp.Array{0: addr, 1: int64(nPort)}},
 			}
 		case "GET":
 			// reply with ASK redirection
@@ -279,4 +280,84 @@ func testRetryConnMoved(t *testing.T, ports []string) {
 	if assert.NoError(t, err, "GET b") {
 		assert.Equal(t, "x", v, "GET value")
 	}
+}
+
+func testRetryConnTriggerRefreshes(t *testing.T, ports []string) {
+	var count int64
+	done := make(chan bool, 1)
+	c := &Cluster{
+		StartupNodes: []string{ports[0]},
+		DialOptions:  []redis.DialOption{redis.DialConnectTimeout(2 * time.Second)},
+		CreatePool:   createPool,
+		LayoutRefresh: func(old, new [HashSlots][]string) {
+			atomic.AddInt64(&count, 1)
+			select {
+			case done <- true:
+			default:
+			}
+		},
+	}
+	defer c.Close()
+
+	conn := c.Get()
+	conn, _ = RetryConn(conn, 3, 100*time.Millisecond)
+	defer conn.Close()
+
+	// set keys from different slots served by different servers
+	// (a=15495, b=3300, abc=7638).
+	_, err := conn.Do("SET", "a", 1)
+	assert.NoError(t, err, "SET a")
+	_, err = conn.Do("SET", "b", 2)
+	assert.NoError(t, err, "SET b")
+	_, err = conn.Do("SET", "abc", 3)
+	assert.NoError(t, err, "SET abc")
+	_, err = conn.Do("INCR", "a")
+	assert.NoError(t, err, "INCR a")
+	_, err = conn.Do("INCR", "b")
+	assert.NoError(t, err, "INCR b")
+	_, err = conn.Do("INCR", "abc")
+	assert.NoError(t, err, "INCR abc")
+
+	v, err := redis.Int(conn.Do("GET", "a"))
+	if assert.NoError(t, err, "GET a") {
+		assert.Equal(t, 2, v)
+	}
+	v, err = redis.Int(conn.Do("GET", "b"))
+	if assert.NoError(t, err, "GET b") {
+		assert.Equal(t, 3, v)
+	}
+	v, err = redis.Int(conn.Do("GET", "abc"))
+	if assert.NoError(t, err, "GET abc") {
+		assert.Equal(t, 4, v)
+	}
+	// return the conn to the pool
+	assert.NoError(t, conn.Close(), "Close conn")
+
+	waitForClusterRefresh(c, nil)
+	<-done
+	// only the first command triggered a refresh, the rest were all known
+	assert.Equal(t, 1, int(atomic.LoadInt64(&count)))
+
+	stats := c.Stats()
+	assert.Len(t, stats, 3)
+	var inuse, idle int
+	for _, st := range stats {
+		inuse += st.ActiveCount - st.IdleCount
+		idle += st.IdleCount
+	}
+	assert.Equal(t, 0, inuse, "connections in use")
+	assert.Equal(t, len(ports), idle, "idle connections in pools")
+
+	// verify the connections count from the servers
+	var clients int
+	err = c.EachNode(false, func(addr string, conn redis.Conn) error {
+		s, err := redis.String(conn.Do("CLIENT", "LIST", "TYPE", "normal"))
+		if err != nil {
+			return err
+		}
+		clients += strings.Count(s, "\n")
+		return nil
+	})
+	require.NoError(t, err)
+	assert.Equal(t, idle, clients, "server-reported clients count")
 }

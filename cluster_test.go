@@ -51,6 +51,7 @@ func TestClusterRedis(t *testing.T) {
 	t.Run("retry conn moved", func(t *testing.T) { testRetryConnMoved(t, ports) })
 	t.Run("each node none", func(t *testing.T) { testEachNodeNone(t, ports) })
 	t.Run("each node some", func(t *testing.T) { testEachNodeSome(t, ports) })
+	t.Run("retry conn trigger refresh", func(t *testing.T) { testRetryConnTriggerRefreshes(t, ports) })
 }
 
 func TestClusterRedisWithReplica(t *testing.T) {
@@ -68,7 +69,7 @@ func TestClusterRedisWithReplica(t *testing.T) {
 	t.Run("layout moved", func(t *testing.T) { testLayoutMovedWithReplica(t, ports) })
 }
 
-func assertMapping(t *testing.T, mapping [hashSlots][]string, masterPorts, replicaPorts []string) {
+func assertMapping(t *testing.T, mapping [HashSlots][]string, masterPorts, replicaPorts []string) {
 	expectedMappingNodes := 1 // at least a master node
 	if len(replicaPorts) > 0 {
 		// if there are replicas, then we expected 2 mapping nodes (master+replica)
@@ -331,7 +332,7 @@ func testLayoutRefreshWithReplica(t *testing.T, ports []string) {
 	var count int
 	c := &Cluster{
 		StartupNodes: []string{ports[0]},
-		LayoutRefresh: func(old, new [hashSlots][]string) {
+		LayoutRefresh: func(old, new [HashSlots][]string) {
 			for slot, maps := range old {
 				assert.Len(t, maps, 0, "slot %d", slot)
 			}
@@ -353,7 +354,7 @@ func testLayoutMovedWithReplica(t *testing.T, ports []string) {
 	done := make(chan bool, 1)
 	c := &Cluster{
 		StartupNodes: []string{ports[0]},
-		LayoutRefresh: func(old, new [hashSlots][]string) {
+		LayoutRefresh: func(old, new [HashSlots][]string) {
 			for slot, maps := range old {
 				if slot == 15495 { // slot of key "a"
 					assert.Len(t, maps, 1, "slot %d", slot)
