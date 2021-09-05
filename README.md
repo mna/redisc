@@ -11,6 +11,8 @@ Package redisc implements a redis cluster client built on top of the [redigo pac
 
 ## Releases
 
+* **v1.3.2** : Export the `HashSlots` constant to make it nicer to write the `Cluster.LayoutRefresh` function signature.
+
 * **v1.3.1** : Fix closing/releasing of connections used in `Cluster.EachNode`.
 
 * **v1.3.0** : Add `Cluster.EachNode` to call a function with a connection for each known node in the cluster (e.g. to run diagnostics commands on each node or to collect all keys in a cluster); add optional Cluster function field `BgError` to receive notification of errors happening in background topology refreshes and on closing of `RetryConn` after following a redirection to a new connection; add optional Cluster function field `LayoutRefresh` to receive the old and new cluster slot mappings to server address(es); prevent unnecessary cluster layout refreshes when the internal mapping is the same as the redirection error; better handling of closed Cluster; move CI to Github Actions; drop support for old Go versions (currently tested on 1.15+); enable more static analysis/linters; refactor tests to create less separate clusters and run faster.
