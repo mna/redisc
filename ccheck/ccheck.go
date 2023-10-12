@@ -27,8 +27,9 @@ var (
 	readTimeoutFlag  = flag.Duration("r", 100*time.Millisecond, "Read `timeout`.")
 	writeTimeoutFlag = flag.Duration("w", 100*time.Millisecond, "Write `timeout`.")
 
-	refreshFlag   = flag.Bool("f", false, "Perform a cluster refresh before starting.")
-	retryConnFlag = flag.Bool("R", false, "Use a single retry connection.")
+	refreshFlag     = flag.Bool("f", false, "Perform a cluster refresh before starting.")
+	retryConnFlag   = flag.Bool("R", false, "Use a single retry connection.")
+	disablePoolFlag = flag.Bool("P", false, "Disable connection pooling.")
 
 	maxIdleFlag   = flag.Int("max-idle", 10, "Maximum idle `connections` per pool.")
 	maxActiveFlag = flag.Int("max-active", 100, "Maximum active `connections` per pool.")
@@ -61,6 +62,10 @@ func main() {
 		CreatePool: createPool,
 	}
 	defer cluster.Close()
+
+	if *disablePoolFlag {
+		cluster.CreatePool = nil
+	}
 
 	if *refreshFlag {
 		if err := cluster.Refresh(); err != nil {
