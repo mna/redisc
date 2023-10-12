@@ -27,6 +27,9 @@ var (
 	readTimeoutFlag  = flag.Duration("r", 100*time.Millisecond, "Read `timeout`.")
 	writeTimeoutFlag = flag.Duration("w", 100*time.Millisecond, "Write `timeout`.")
 
+	refreshFlag   = flag.Bool("f", false, "Perform a cluster refresh before starting.")
+	retryConnFlag = flag.Bool("R", false, "Use a single retry connection.")
+
 	maxIdleFlag   = flag.Int("max-idle", 10, "Maximum idle `connections` per pool.")
 	maxActiveFlag = flag.Int("max-active", 100, "Maximum active `connections` per pool.")
 )
@@ -59,11 +62,17 @@ func main() {
 	}
 	defer cluster.Close()
 
+	if *refreshFlag {
+		if err := cluster.Refresh(); err != nil {
+			log.Fatalf("failed to refresh cluster: %v", err)
+		}
+	}
+
 	errCh := make(chan error, 1)
 	go printStats()
 	go printErr(errCh)
 
-	runChecks(cluster, errCh, *delayFlag)
+	runChecks(cluster, errCh, *delayFlag, *retryConnFlag)
 }
 
 func getRetryConn(cluster *redisc.Cluster) redis.Conn {
@@ -75,15 +84,17 @@ func getRetryConn(cluster *redisc.Cluster) redis.Conn {
 	return c
 }
 
-func runChecks(cluster *redisc.Cluster, errCh chan<- error, delay time.Duration) {
+func runChecks(cluster *redisc.Cluster, errCh chan<- error, delay time.Duration, useRetryConn bool) {
 	var c redis.Conn
 
 	cache := make(map[string]int, workingSet)
 	for {
 		var r, w, fr, fw, lw, naw int
 
-		if c == nil {
+		if useRetryConn && c == nil {
 			c = getRetryConn(cluster)
+		} else {
+			c = cluster.Get()
 		}
 
 		key := genKey()
@@ -131,6 +142,10 @@ func runChecks(cluster *redisc.Cluster, errCh chan<- error, delay time.Duration)
 		} else {
 			w = 1
 			cache[key] = v
+		}
+
+		if !useRetryConn {
+			c.Close()
 		}
 
 		updateStats(w, r, fw, fr, lw, naw)
