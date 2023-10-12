@@ -1,7 +1,6 @@
 linters:
   disable-all: true
   enable:
-    - deadcode
     - errcheck
     - gci
     - gochecknoinits
@@ -16,12 +15,10 @@ linters:
     - prealloc
     - revive
     - staticcheck
-    - structcheck
     - typecheck
     - unconvert
     - unparam
     - unused
-    - varcheck
 
 linters-settings:
   revive:

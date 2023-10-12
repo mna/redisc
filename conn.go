@@ -17,23 +17,23 @@ var _ redis.ConnWithTimeout = (*Conn)(nil)
 // yet bound to any node in the cluster.  Only when a call to Do, Send, Receive
 // or Bind is made is a connection to a specific node established:
 //
-//     - if Do or Send is called first, the command's first parameter is
+//   - if Do or Send is called first, the command's first parameter is
 //     assumed to be the key, and its slot is used to find the node
-//     - if Receive is called first, or if Do or Send is called first but with
+//   - if Receive is called first, or if Do or Send is called first but with
 //     no parameter for the command (or no command), a random node is selected
 //     in the cluster
-//     - if Bind is called first, the node corresponding to the slot of the
+//   - if Bind is called first, the node corresponding to the slot of the
 //     specified key(s) is selected
 //
 // Because Get and Dial return a redis.Conn interface, a type assertion can be
 // used to call Bind or ReadOnly on this concrete Conn type:
 //
-//     redisConn := cluster.Get()
-//     if conn, ok := redisConn.(*redisc.Conn); ok {
-//       if err := conn.Bind("my-key"); err != nil {
-//         // handle error
-//       }
-//     }
+//	redisConn := cluster.Get()
+//	if conn, ok := redisConn.(*redisc.Conn); ok {
+//	  if err := conn.Bind("my-key"); err != nil {
+//	    // handle error
+//	  }
+//	}
 //
 // Alternatively, the package-level BindConn or ReadOnlyConn helper functions
 // may be used.
