@@ -106,7 +106,13 @@ func (c *Cluster) refresh(bg bool) error {
 	var errMsgs []string
 	var oldm, newm [HashSlots][]string
 
-	addrs, _ := c.getNodeAddrs(false)
+	// get all node addrs, including replicas
+	addrs, _ := c.getNodeAddrs(true)
+	// when addrs cannot be obtained, StartupNodes is always used to populate
+	if len(addrs) == 0 {
+		addrs = c.StartupNodes
+	}
+
 	for _, addr := range addrs {
 		m, err := c.getClusterSlots(addr)
 		if err != nil {
