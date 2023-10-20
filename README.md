@@ -11,6 +11,8 @@ Package redisc implements a redis cluster client built on top of the [redigo pac
 
 ## Releases
 
+* **v1.4.0** : Improve the reliability of the refresh of cluster mapping for edge cases where no nodes are known anymore (thanks to [@ljfuyuan][ljfuyuan]).
+
 * **v1.3.2** : Export the `HashSlots` constant to make it nicer to write the `Cluster.LayoutRefresh` function signature.
 
 * **v1.3.1** : Fix closing/releasing of connections used in `Cluster.EachNode`.
@@ -91,3 +93,4 @@ The [BSD 3-Clause license][bsd].
 [letsfire]: https://github.com/letsfire
 [iwanbk]: https://github.com/iwanbk
 [tysonmote]: https://github.com/tysonmote
+[ljfuyuan]: https://github.com/ljfuyuan
